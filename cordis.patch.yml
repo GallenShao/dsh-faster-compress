@@ -1,0 +1,20 @@
+# Composition for dsh-faster-compress.
+#
+# The stock `compaction-basic` row is disabled rather than renamed: in the
+# Cordis loader dialect a `name` on a non-insert patch asserts the existing
+# plugin name instead of changing it, so overriding `name` would not swap the
+# implementation.
+#
+# The inserted row mounts a subclass of the shipped backend. It registers
+# itself as the `compaction` service, so `command-compact`,
+# `compaction-tool-result-pruner` and `compaction-image-offload` keep
+# resolving `ctx.compaction` with no further changes.
+#
+# Leave `config` empty to inherit the shipped defaults; see README.md for the
+# settings this bundle adds on top of them.
+- id: compaction-basic
+  disabled: true
+
+- insert:
+    - id: faster-compress
+      name: 'dsh-faster-compress'

@@ -1,0 +1,4 @@
+{
+  "title": "Faster Compress",
+  "description": "Compacts context in the background so the agent never pauses to wait for a summary."
+}
