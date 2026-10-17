@@ -42,6 +42,8 @@ Through the plugin manager: **Plugins → Install bundle**, with the specifier `
 
 Install from a tarball, a registry, or GitHub rather than from a checked-out directory. A local-directory install links the package outside the profile dependency tree, and the `@deepseek-ai/*` peer packages are not resolvable from there; in testing the row loaded as `failed to import`. Copy-based installs place the package inside the tree with its peers linked.
 
+If a bundle fails to load once, the running process keeps that outcome: reinstalling the same package name reports `failed to import` again without ever reaching the module, no matter what you change in the meantime. Restart the harness to retry a load.
+
 The bundle disables the stock `compaction-basic` row and mounts a subclass of it in its place. Because that subclass registers itself as the `compaction` service, `/compact`, the tool-result pruner, and image offload keep working with no further changes.
 
 ## Configuration

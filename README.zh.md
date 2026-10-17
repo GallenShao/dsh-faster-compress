@@ -42,6 +42,8 @@
 
 请用 tgz、registry 或 GitHub 安装，不要直接指向检出的目录。指向本地目录的安装会把包 link 到 profile 依赖树之外，`@deepseek-ai/*` 这些 peer 包在那里解析不到；实测结果是这一行以 `failed to import` 收场。基于复制的安装（registry、GitHub、tgz）会把包放进依赖树并链好 peer，这才是本 bundle 需要的方式。
 
+一个 bundle 只要失败过一次，运行中的进程就会记住这个结果：之后同名包无论怎么改、怎么重装，都继续报 `failed to import`，连模块都不会被执行。要重试必须重启 harness。
+
 bundle 会禁用自带的 `compaction-basic` 行，在原位挂载它的子类。子类把自己注册为 `compaction` 服务，所以 `/compact`、工具结果裁剪、图片卸载都不需要额外改动。
 
 ## 配置
