@@ -1,6 +1,6 @@
 # 项目约定
 
-- 项目作者和 Git 提交身份为 `gallenshao <shaojialun@pku.edu.cn>`。提交前核对仓库实际生效的 `user.name`、`user.email`，避免仓库局部配置覆盖正确的全局身份。
+- 提交前核对仓库实际生效的 `user.name`、`user.email` 是否符合用户指定的身份，避免仓库局部配置覆盖正确的全局身份。此文件只记录通用协作规则，不写入个人姓名或邮箱。
 - 默认 README 使用中文；同步维护 `README.en.md`。
 - 优先参照当前安装的 DSH 发布包确认接口。父目录的 `AGENTS.md` 记录了本机运行时的位置和限制。
 - 不修改用户日常使用的 DSH 配置；集成验证使用隔离的 `DSH_HOME`。
