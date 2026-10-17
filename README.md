@@ -95,4 +95,8 @@ npm pack
 
 回归测试覆盖阈值与区间选择、摘要取消、预算重试、预热开关与失败回退、真实 DSH Session 提交和回放，以及设置的校验与实时读取。模型 I/O 使用测试桩，未替代真实端点的性能验证。
 
-[更新记录](CHANGELOG.md) · [MIT License](LICENSE)
+## 发布维护
+
+每次版本变更和发布都须由项目所有者明确审批。先完成实现、文档和测试，再提交拟用版本、变更摘要及验证结果供审阅；批准后才修改版本号、建立发布标签并发布。每个 npm 版本对应确定的 Git 提交和 `v<版本号>` 标签，详见仓库中的 [发布记录与审批规则](https://github.com/GallenShao/dsh-faster-compress/blob/main/RELEASES.md)。
+
+[更新记录](CHANGELOG.md) · [源代码](https://github.com/GallenShao/dsh-faster-compress) · [MIT License](LICENSE)

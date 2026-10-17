@@ -95,4 +95,8 @@ The published package includes its browser settings module and both SVG diagrams
 
 Regression tests cover budgets and selection, cancellation, pressure retries, warm-up and failure fallback, real DSH Session commits and replay, and settings validation and live reads. Model I/O is stubbed; these checks do not replace real-endpoint performance measurements.
 
-[Changelog](CHANGELOG.md) · [MIT License](LICENSE)
+## Release maintenance
+
+Every version change and release requires explicit approval from the project owner. Complete implementation, documentation, and testing first, then submit the proposed version, change summary, and validation results for review. Only after approval may the version be changed, the release tag created, and the package published. Each npm version maps to a specific Git commit and a `v<version>` tag. See the repository's [release records and approval policy](https://github.com/GallenShao/dsh-faster-compress/blob/main/RELEASES.md).
+
+[Changelog](CHANGELOG.md) · [Source](https://github.com/GallenShao/dsh-faster-compress) · [MIT License](LICENSE)
