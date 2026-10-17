@@ -6,9 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## 0.1.0
 
-Initial release.
+### Fixed
+
+- Separate eager settings from the stock backend's strict configuration so
+  explicit settings load successfully.
+- Make pending-summary waits cancellable and cancel abandoned background work.
+- Recheck pressure after a prepared commit and honor the remaining compaction
+  retries before returning success.
+- Consume the asynchronous warm-up stream and respect `warmup: false`.
+- Let a model-specific retention ratio replace a global absolute retention budget.
 
 ### Added
+
+- A native DSH plugin settings page in Chinese and English, with live settings,
+  validation, staged saves, and restore-default actions.
+- Chinese-first README, a maintained English edition, and bilingual SVG diagrams.
+- Ready-to-install browser assets in the npm package; no consumer build required.
+- Engine regression tests using real DSH sessions for commits and replay, with
+  stubbed model I/O for cancellation, warm-up, pressure retries, and fallbacks.
+
+### Initial features
 
 - Background summary generation started at an eager pressure threshold
   (`eagerRatio`, default 0.85) or when a tool call opens a quiescent window.

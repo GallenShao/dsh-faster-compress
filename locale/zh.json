@@ -1,4 +1,25 @@
 {
-  "title": "更快的压缩",
-  "description": "在后台压缩上下文，agent 不再为了等待摘要而停顿。"
+  "title": "更快压缩 · Faster Compress",
+  "description": "提前在后台准备上下文摘要，减少长对话里的压缩等待。",
+  "liveHint": "默认即可使用。保存后影响后续的摘要准备和预热，无需重启。",
+  "eagerRatio": "提前准备时机（%）",
+  "eagerRatioHint": "默认 85：达到压缩阈值的 85% 时准备摘要。调低可更早开始，也可能多生成用不上的摘要。",
+  "eagerRatioInvalid": "请输入大于 0、小于 100 的百分比。",
+  "warmup": "预热新上下文",
+  "warmupHint": "默认开启。在工具执行期间发送一次极短请求，尝试预热压缩后的前缀缓存。会产生额外请求；缓存复用效果取决于模型服务。",
+  "advanced": "更多选项",
+  "maxConcurrent": "后台摘要并发数",
+  "maxConcurrentHint": "默认 1，同一主机所有会话共用。只有模型服务有余力时才建议调高。",
+  "maxConcurrentInvalid": "请输入不小于 1 的整数。",
+  "warmupMaxTokens": "预热输出上限（tokens）",
+  "warmupMaxTokensHint": "默认 1，可选 1–8。通常无需修改。",
+  "warmupMaxTokensInvalid": "请输入 1–8 之间的整数。",
+  "overridden": "已覆盖",
+  "reset": "恢复默认",
+  "resetAll": "恢复全部默认值（保存后生效）",
+  "unavailable": "压缩插件尚未加载，暂时无法配置。",
+  "readOnly": "当前部署的设置为只读。",
+  "saveFailed": "保存未成功。请检查数值；若设置已在别处修改，请重新打开后再试。",
+  "save": "保存",
+  "saving": "保存中…"
 }

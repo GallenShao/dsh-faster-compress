@@ -62,8 +62,20 @@ test('policyFor replaces only the fields an override states', () => {
   const policy = policyFor(config, { provider: 'p', model: 'm' })
   assert.equal(policy.thresholdRatio, 0.6)
   assert.equal(policy.retainTokens, 4096)
+  assert.equal(policy.retainRatio, undefined, 'absolute retention replaces the inherited ratio')
   assert.equal(policy.headroomTokens, base.headroomTokens, 'unstated fields keep the default')
   assert.equal(policy.eagerRatio, base.eagerRatio, 'eagerRatio is not overridable per target')
+})
+
+test('a per-model ratio replaces inherited absolute retention without mutating defaults', () => {
+  const config = {
+    ...base, retainRatio: undefined, retainTokens: 500,
+    modelPolicies: [{ provider: 'p', model: 'm', retainRatio: 0.1 }],
+  }
+  const policy = policyFor(config, { provider: 'p', model: 'm' })
+  assert.equal(policy.retainTokens, undefined)
+  assert.equal(budgets(policy, 1000, 0).retainTokens, 100)
+  assert.equal(config.retainTokens, 500)
 })
 
 test('per-target thresholds follow the override', () => {

@@ -1,4 +1,25 @@
 {
   "title": "Faster Compress",
-  "description": "Compacts context in the background so the agent never pauses to wait for a summary."
+  "description": "Prepare context summaries in the background to reduce compaction pauses in long conversations.",
+  "liveHint": "The defaults are ready to use. Saved changes apply to subsequent preparation and warm-up without a restart.",
+  "eagerRatio": "Start preparation at (%)",
+  "eagerRatioHint": "Default 85: prepare at 85% of the compaction threshold. Lower values start earlier but may produce more unused summaries.",
+  "eagerRatioInvalid": "Enter a percentage greater than 0 and less than 100.",
+  "warmup": "Warm the new context",
+  "warmupHint": "On by default. Send a tiny request during tool execution to try to warm the compacted prefix cache. This adds a request; reuse depends on your model provider.",
+  "advanced": "More options",
+  "maxConcurrent": "Concurrent background summaries",
+  "maxConcurrentHint": "Default 1, shared across this host's sessions. Increase only when the model provider has spare capacity.",
+  "maxConcurrentInvalid": "Enter an integer of at least 1.",
+  "warmupMaxTokens": "Warm-up output limit (tokens)",
+  "warmupMaxTokensHint": "Default 1; accepts 1–8. Usually no change is needed.",
+  "warmupMaxTokensInvalid": "Enter an integer from 1 to 8.",
+  "overridden": "Overridden",
+  "reset": "Reset to default",
+  "resetAll": "Restore all defaults (save to apply)",
+  "unavailable": "The compaction plugin is not loaded, so settings are unavailable.",
+  "readOnly": "This deployment stores settings read-only.",
+  "saveFailed": "Save failed. Check the values; if settings changed elsewhere, reopen this page and try again.",
+  "save": "Save",
+  "saving": "Saving…"
 }

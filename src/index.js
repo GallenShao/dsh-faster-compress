@@ -28,6 +28,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { isVolatile } from '@deepseek-ai/cosmokit'
 import z from '@deepseek-ai/schemastery'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
@@ -74,13 +75,15 @@ const configSchema = z.object({
   auto: z.boolean(),
 
   /** Fraction of the commit threshold at which a summary is generated ahead of time. Below 1. */
-  eagerRatio: ratio,
+  // Serializable open-interval bounds: the settings client rehydrates schemas
+  // and cannot execute a server-only transform callback.
+  eagerRatio: z.number().min(Number.MIN_VALUE).max(1 - Number.EPSILON / 2).default(0.85).volatile(),
   /** Warm the rewritten request prefix while a tool runs, so committing costs no cold prefill. */
-  warmup: z.boolean(),
+  warmup: z.boolean().default(true).volatile(),
   /** Generation cap of the warm-up request; it exists to populate the prefix cache, not to answer. */
-  warmupMaxTokens: warmupTokens,
+  warmupMaxTokens: warmupTokens.default(1).volatile(),
   /** Summaries generated concurrently across all sessions of this host. */
-  maxConcurrent: positiveInt,
+  maxConcurrent: z.number().step(1).min(1).default(1).volatile(),
 })
 
 /** Defaults for the added fields. */
@@ -90,6 +93,22 @@ const DEFAULTS = Object.freeze({
   warmupMaxTokens: 1,
   maxConcurrent: 1,
 })
+
+/** Stop waiting immediately on cancellation, even if the provider ignores it. */
+async function waitForSummary(settled, signal) {
+  signal.throwIfAborted()
+  let onAbort
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    await Promise.race([settled, aborted])
+    signal.throwIfAborted()
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+}
 
 /**
  * A basic compaction backend that generates summaries ahead of the threshold
@@ -109,26 +128,31 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
   #capacity = new Map()
   /** Cancellation for background work, independent of any single turn. */
   #abort = new AbortController()
+  /** Loader-owned live settings; reads never remount the compaction service. */
+  #eagerConfig
+
+  get eager() {
+    return Object.freeze(Object.fromEntries(Object.entries(DEFAULTS).map(([key, fallback]) => {
+      const value = this.#eagerConfig[key]
+      return [key, (isVolatile(value) ? value.get() : value) ?? fallback]
+    })))
+  }
 
   constructor(ctx, config = {}) {
-    super(ctx, config)
-    const eagerRatio = config.eagerRatio ?? DEFAULTS.eagerRatio
+    const { eagerRatio: configuredRatio, warmup, warmupMaxTokens, maxConcurrent, ...basicConfig } = config
+    super(ctx, basicConfig)
+    this.#eagerConfig = { eagerRatio: configuredRatio, warmup, warmupMaxTokens, maxConcurrent }
+    const { eagerRatio } = this.eager
     if (!(eagerRatio > 0 && eagerRatio < 1)) {
       throw new Error(`dsh-faster-compress: eagerRatio (${eagerRatio}) must be greater than 0 and less than 1`)
     }
-    this.eager = Object.freeze({
-      eagerRatio,
-      warmup: config.warmup ?? DEFAULTS.warmup,
-      warmupMaxTokens: config.warmupMaxTokens ?? DEFAULTS.warmupMaxTokens,
-      maxConcurrent: config.maxConcurrent ?? DEFAULTS.maxConcurrent,
-    })
     ctx.effect(() => () => this.#abort.abort())
     if (this.config.auto) this.#registerTriggers()
   }
 
   /**
-   * Consider automatic compaction, without blocking on a summary that is
-   * already being written.
+   * Prepare below the pressure threshold; at the threshold, wait cancellably
+   * for a pending summary and enforce the inherited retry budget.
    *
    * @param {import('@deepseek-ai/dsh-agent').Agent} agent Agent whose latest routed request is measured.
    * @param {'pressure' | 'context-overflow'} trigger Normal step pressure or provider-confirmed overflow.
@@ -136,11 +160,16 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {Promise<import('@deepseek-ai/dsh-compaction').CompactionResult | null>} The committed compaction, if any.
    */
   async compactIfNeeded(agent, trigger, signal) {
+    signal.throwIfAborted()
     // Overflow recovery is a repair, not a scheduled compaction: it forces a
     // reduction below the normal thresholds and must run inline.
-    if (trigger === 'context-overflow') return super.compactIfNeeded(agent, trigger, signal)
+    if (trigger === 'context-overflow') {
+      this.#discard(agent.session)
+      return super.compactIfNeeded(agent, trigger, signal)
+    }
 
-    const budget = await this.#budget(agent)
+    const budget = await this.#budget(agent, signal)
+    signal.throwIfAborted()
     // Without a resolvable capacity the inherited path reports the
     // configuration error, which is the diagnosis the operator needs.
     if (budget === null) return super.compactIfNeeded(agent, trigger, signal)
@@ -150,7 +179,7 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     if (total < budget.eagerTokens) return null
 
     if (total < budget.thresholdTokens) {
-      this.#start(agent, budget)
+      this.#start(agent, budget, signal)
       return null
     }
 
@@ -164,7 +193,22 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
         + `surface nodes (seqs ${committed.shadowedRange.start}-${committed.shadowedRange.end}, `
         + `~${committed.shadowedTokenCount} tokens)`,
       )
-      return committed
+      // A large result may have arrived after selection. Count the prepared
+      // commit as the first attempt, then use the stock transaction for retries.
+      const policy = policyFor(this.config, session.requestHeader().config)
+      let result = committed
+      let measurement = this.ctx.tokenMeter.measure(session)
+      for (let retry = 0; measurement.totalTokens >= budget.thresholdTokens && retry < policy.compactionRetries; retry += 1) {
+        signal.throwIfAborted()
+        const selection = selectRange(session, measurement, budget.retainTokens)
+        if (selection === null) break
+        result = await this.compactRegion(selection.start, selection.end, agent, signal)
+        measurement = this.ctx.tokenMeter.measure(session)
+      }
+      if (measurement.totalTokens >= budget.thresholdTokens) {
+        throw new Error(`compaction still above threshold after ${policy.compactionRetries + 1} compaction attempts (${measurement.totalTokens} estimated tokens >= threshold ${budget.thresholdTokens})`)
+      }
+      return result
     }
     // The prepared summary went stale or did not shrink enough; fall back to
     // the inherited path rather than skipping a compaction the surface needs.
@@ -186,10 +230,12 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     if (agent === undefined) return
     const pending = this.#pending.get(session)
     if (pending !== undefined) {
-      if (pending.summary !== undefined && !pending.warmed) this.#warmup(agent, pending)
+      if (this.eager.warmup && pending.summary !== undefined && !pending.warmed) void this.#warmup(agent, pending)
       return
     }
-    void this.#tryStart(agent)
+    void this.#tryStart(agent).catch(error => {
+      this.ctx.logger.debug?.(`faster-compress: background preparation failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
   /** Register the listeners this bundle adds to the inherited ones. */
@@ -229,14 +275,14 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @param {import('@deepseek-ai/dsh-agent').Agent} agent Agent whose route defines the budgets.
    * @returns {Promise<import('./budget.js').Budget | null>} Budgets, or `null` when capacity is unknown.
    */
-  async #budget(agent) {
+  async #budget(agent, signal = this.#abort.signal) {
     const config = agent.session.requestHeader()?.config
     if (config === undefined || config.provider.length === 0 || config.model.length === 0) return null
     const target = { provider: config.provider, model: config.model }
     const key = `${target.provider}/${target.model}`
     let info = this.#capacity.get(key)
     if (info === undefined) {
-      info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, this.#abort.signal)
+      info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
       this.#capacity.set(key, info)
     }
     if (info.context?.contextWindow === undefined) return null
@@ -254,16 +300,22 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    *
    * @param {import('@deepseek-ai/dsh-agent').Agent} agent Agent owning the session.
    * @param {import('./budget.js').Budget} budget Budgets measured for this decision.
+   * @param {AbortSignal} [turnSignal] Cancellation of the turn that starts preparation.
    * @returns {void}
    */
-  #start(agent, budget) {
+  #start(agent, budget, turnSignal) {
     const session = agent.session
-    if (this.#pending.has(session) || this.#inFlight >= this.eager.maxConcurrent) return
+    if (this.#abort.signal.aborted || turnSignal?.aborted || this.#pending.has(session) || this.#inFlight >= this.eager.maxConcurrent) return
 
     const selection = selectRange(session, this.ctx.tokenMeter.measure(session), budget.retainTokens)
     if (selection === null) return
 
+    const abort = new AbortController()
+    const signal = AbortSignal.any([this.#abort.signal, abort.signal, ...(turnSignal === undefined ? [] : [turnSignal])])
+    const input = summarizationInput(session, selection.seqs)
     const prepared = {
+      abort,
+      signal,
       compactionId: CompactionId(randomUUID()),
       selection,
       summary: undefined,
@@ -271,26 +323,26 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
       settled: undefined,
       warmed: false,
     }
-    const settled = this.summarize(summarizationInput(session, selection.seqs), agent, this.#abort.signal).then(
-      result => {
+    this.#pending.set(session, prepared)
+    this.#inFlight += 1
+    prepared.settled = (async () => {
+      try {
+        const result = await this.summarize(input, agent, signal)
         // Discarded while generating: the surface moved on, so the summary is
         // for a span nobody intends to replace any more.
         if (this.#pending.get(session) !== prepared) return
         prepared.summary = result.summary
         prepared.envelope = result
-      },
-      error => {
+      } catch (error) {
         if (this.#pending.get(session) === prepared) this.#pending.delete(session)
         this.ctx.logger.debug?.(
           `faster-compress: background summary failed, falling back to inline compaction: `
           + `${error instanceof Error ? error.message : String(error)}`,
         )
-      },
-    )
-    prepared.settled = settled
-    this.#pending.set(session, prepared)
-    this.#inFlight += 1
-    settled.finally(() => { this.#inFlight -= 1 })
+      } finally {
+        this.#inFlight -= 1
+      }
+    })()
   }
 
   /**
@@ -302,12 +354,15 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {Promise<import('@deepseek-ai/dsh-compaction').CompactionResult | null>} The result, or `null` when the summary was dropped.
    */
   async #commit(agent, pending, signal) {
-    if (pending.summary === undefined) {
-      // Still generating. Waiting here is strictly cheaper than the inherited
-      // path, which would start the same call from scratch.
-      await pending.settled
+    const operationSignal = AbortSignal.any([signal, pending.signal])
+    try {
+      operationSignal.throwIfAborted()
+      if (pending.summary === undefined) await waitForSummary(pending.settled, operationSignal)
+    } catch (error) {
+      if (this.#pending.get(agent.session) === pending) this.#discard(agent.session)
+      throw error
     }
-    if (signal.aborted || this.#pending.get(agent.session) !== pending) return null
+    if (this.#pending.get(agent.session) !== pending) return null
     if (pending.summary === undefined) return null
 
     const session = agent.session
@@ -362,29 +417,31 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    *
    * @param {import('@deepseek-ai/dsh-agent').Agent} agent Agent owning the session.
    * @param {object} pending A prepared summary.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  #warmup(agent, pending) {
+  async #warmup(agent, pending) {
     pending.warmed = true
-    const config = agent.session.requestHeader()?.config
-    if (config === undefined || config.provider.length === 0 || config.model.length === 0) return
-    const prefix = postCommitPrefix(agent.session, pending.selection, checkpointMessage(pending.summary, pending.compactionId))
-    this.ctx.llm.stream({
-      provider: config.provider,
-      model: config.model,
-      messages: prefix.messages,
-      ...prefix.tools === undefined ? {} : { tools: [...prefix.tools] },
-      toolHistory: agent.session.toolHistory(),
-      maxTokens: this.eager.warmupMaxTokens,
-      sessionId: agent.session.id,
-      signal: this.#abort.signal,
-    }).then(
-      () => {},
-      () => {
-        // A failed warm-up only means the first request after the commit pays
-        // its own prefill, which is the behaviour with warm-up disabled.
-      },
-    )
+    try {
+      pending.signal.throwIfAborted()
+      const config = agent.session.requestHeader()?.config
+      if (config === undefined || config.provider.length === 0 || config.model.length === 0) return
+      const prefix = postCommitPrefix(agent.session, pending.selection, checkpointMessage(pending.summary, pending.compactionId))
+      for await (const chunk of this.ctx.llm.stream({
+        provider: config.provider,
+        model: config.model,
+        messages: prefix.messages,
+        ...prefix.tools === undefined ? {} : { tools: [...prefix.tools] },
+        toolHistory: agent.session.toolHistory(),
+        maxTokens: this.eager.warmupMaxTokens,
+        sessionId: agent.session.id,
+        signal: pending.signal,
+      })) {
+        // Consuming the stream drives the request; generated output is unused.
+      }
+    } catch {
+      // A failed warm-up only means the first request after the commit pays
+      // its own prefill, which is the behaviour with warm-up disabled.
+    }
   }
 
   /**
@@ -394,7 +451,9 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {void}
    */
   #discard(session) {
+    const pending = this.#pending.get(session)
     this.#pending.delete(session)
+    pending?.abort.abort()
   }
 }
 

@@ -56,6 +56,9 @@ export function policyFor(config, target) {
   for (const key of OVERRIDABLE) {
     if (override[key] !== undefined) merged[key] = override[key]
   }
+  // Retention is one policy choice, not two independent numeric overrides.
+  if (override.retainTokens !== undefined) delete merged.retainRatio
+  else if (override.retainRatio !== undefined) delete merged.retainTokens
   return merged
 }
 
