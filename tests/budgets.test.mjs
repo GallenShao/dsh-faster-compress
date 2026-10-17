@@ -11,12 +11,14 @@ const base = {
   modelPolicies: [],
 }
 
-test('threshold is the smaller of the window fraction and the budget minus headroom', () => {
+test('threshold is the smaller of the window fraction and the budget minus preparation headroom', () => {
   // window 131072, reserved 8192 -> message budget 122880
-  // window fraction 104857.6 vs budget minus headroom 90112 -> headroom wins
+  // window fraction 104857.6 vs budget minus preparation headroom 106496 -> headroom wins
   assert.deepEqual(budgets(base, 131072, 8192), {
-    thresholdTokens: 90112,
-    eagerTokens: 76595,
+    thresholdTokens: 104857,
+    eagerTokens: 89128,
+    waitTokens: 118784,
+    contextWindow: 131072, reservedCompletion: 8192, inputLimit: 122880,
     retainTokens: 19660,
   })
 
@@ -82,4 +84,16 @@ test('per-target thresholds follow the override', () => {
   const config = { ...base, modelPolicies: [{ provider: 'p', model: 'm', thresholdRatio: 0.5 }] }
   const policy = policyFor(config, { provider: 'p', model: 'm' })
   assert.equal(budgets(policy, 131072, 8192).thresholdTokens, 65536)
+})
+
+test('Qwen reserves the complete output cap and a separate small safety margin', () => {
+  const budget = budgets({ ...base, headroomTokens: 65536, eagerRatio: 1 }, 262144, 32768)
+  assert.equal(budget.inputLimit, 229376)
+  assert.equal(budget.thresholdTokens, 196608)
+  assert.equal(budget.eagerTokens, 196608)
+  assert.equal(budget.waitTokens, 225280)
+  assert.equal(262144 - budget.waitTokens, 32768 + 4096)
+  const clamped = budgets({ ...base, headroomTokens: 0, safetyMarginTokens: 300 }, 1000, 100)
+  assert.equal(clamped.thresholdTokens, 600)
+  assert.equal(clamped.waitTokens, 600, 'preparation cannot start beyond the wait limit')
 })

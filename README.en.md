@@ -8,9 +8,11 @@
 ![DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.0--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://cdn.jsdelivr.net/npm/dsh-faster-compress@0.1.0/assets/overview-en.svg)
+![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.0/assets/overview-en.svg)
 
-Long conversations in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) need context compaction. The stock backend writes a summary before the next step can begin. **Faster Compress starts that work earlier, in the background**: prepare while tools run and the task moves forward, then replace history when pressure reaches the compaction threshold.
+Long conversations in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) need context compaction. The stock backend writes a summary before the next step can begin. **Faster Compress starts that work earlier, in the background**: start at the preparation threshold, let the task continue within safe headroom, and apply a ready summary before the next model request. Separate warm-up is off by default.
+
+> **0.2.0** adds Compaction History, post-application response timings, and safer background preparation. Upgrades preserve saved settings; to adopt the new defaults, set preparation to **100%** and warm-up to **Off**.
 
 ## Install with one package name
 
@@ -39,45 +41,84 @@ Then restart `dsh web`. For the desktop app, use its Add plugin screen.
 
 | When… | Faster Compress… |
 | --- | --- |
-| A long task approaches the context limit | Starts preparation at **85%** of the compaction threshold by default |
-| A tool is running | Uses the window to prepare a summary or try to warm the new prefix |
-| The summary is ready before the threshold | Keeps the original history, delaying prefix-cache invalidation |
-| Pressure reaches the threshold | Commits at a step boundary and preserves messages appended during preparation |
+| Pressure reaches the preparation threshold | Starts background preparation while the task continues within safe headroom |
+| The summary is ready | Applies at the next safe step boundary, preserving newly appended messages |
+| Preparation is unfinished at the safety limit | Waits before the next main request, or uses stock compaction if no preparation is available |
+| The next real request | Processes the new context directly, without waiting for a warm-up request |
 | Preparation fails or the selected content changes | Discards the result and falls back to stock synchronous compaction |
 
 The plugin replaces the stock compaction backend while retaining its summarization instruction and commit event format. `/compact`, tool-result pruning, and image offload remain available.
 
+## See every compaction
+
+Open **Compaction History** at the top of a conversation. Select a record on the left; inspect its outcome, timeline, and content on the right. Developer mode is not required.
+
+- **Clear outcomes:** preparing, ready, waiting at the safety limit, applied, superseded, failed, or discarded with a reason. Application status follows actual replacements in the session log.
+- **Traceable content:** switch between the summary, original text excerpt, and diagnostics; search, filter, and copy. Inspect the model, source range, token estimates, and available usage data.
+- **Measured stages:** background generation, safety-limit wait, commit, and warm-up durations. Generation and waiting can overlap; these values do not measure time saved.
+- **Response recovery:** inspect compaction blocking to first output, replacement to first output, and the TTFT of the request that produced it. First reasoning, text, and tool deltas have separate times relative to application, with failures, retries, and cancellation recorded independently.
+- **Useful failures:** inspect summary and warm-up errors, stale selections, and reload invalidation. A failed warm-up does not prevent a usable summary from being committed.
+
+The view updates automatically, supports Chinese and English, and follows the DSH theme. It shows the most recent 80 records per conversation. Native historical compactions remain visible, with `—` for preparation timings that were never recorded.
+
+“Applied” follows actual session replacements. Request inclusion is verified separately against the checkpoint message ID and compaction ID in the DSH main request. Summary and warm-up calls are excluded. This verifies the DSH call boundary, not provider receipt or a cache hit.
+
+Same-model summaries (including manual compaction, overflow recovery, and inline fallback) and warm-up inherit the conversation's `reasoningEffort`, preventing provider defaults from changing the chat-template prefix. A separately configured summary model retains its own defaults. Warm-up records a logical prefix fingerprint: route, reasoning, system, or tool changes invalidate it without discarding a usable summary or repeatedly warming again. Appended messages can reuse the earlier prefix but still require prefill for the new tail. Fingerprints cannot observe provider-side template changes or cache eviction.
+
+Compaction History shows provider-reported cache-read tokens for summaries, warm-up, and subsequent request attempts, plus reasoning settings. Missing cache counts remain `—`. Warm-up completion, logical prefix matching, and actual cache hits are separate observations; TTFT is not a measurement of prefill alone.
+
+Response durations use the host's monotonic clock. They include subsequent processing, model queuing, and request-chain waiting, but exclude browser delivery and rendering. First output follows DSH's first non-empty text, reasoning, or tool delta definition; per-kind times ignore whitespace-only text. Observation covers the first main request after application and its failed retries, then stops when that request completes. Later tool-loop requests are not accumulated; tool-only responses leave text timing as `—`. TTFT belongs to the attempt that actually produced the first output, while total waiting includes prior failures and retries. Each record keeps the latest eight attempts. Manual `/compact` can leave an idle interval before the next user input, so post-application timing can include that interval but compaction-blocking time stays unset. Restart or unload interrupts unfinished observations; historical first-token times are never inferred from completion timestamps.
+
+Diagnostics live separately in `$DSH_HOME/data/faster-compress/traces/` (default `~/.dsh/data/faster-compress/traces/`), without adding session events. Each conversation retains up to 80 background records, with original excerpts capped at 12,000 characters and summaries at 24,000; truncation is indicated. Only text is retained, without attachments. Common credential patterns are masked in errors; original excerpts and summaries preserve conversation content. Storage failure does not block compaction and is reported in the view.
+
+Hiding the history tab keeps diagnostic collection enabled. To remove these local copies, stop DSH and delete that directory. Committed summaries in native session logs remain managed by DSH.
+
+**History reports `strict definition was withdrawn`?** An earlier development build incorrectly unmounted the history service during registration. Version 0.2.0 fixes it. After updating, restart DSH when active work finishes and refresh the page. Keep history files and strict RPC validation intact.
+
+**What if an update loses the prepared summary?** Preparation is held in memory. Diagnostic files never reapply old summaries after restart. Missing results are prepared again within the safe budget; at the safety limit, they fall back to stock synchronous compaction. Failed summaries and stale selections fall back at the preparation threshold, as does reload cancellation of preparation during a live turn. Explicitly cancelled turns stay cancelled. Integration replaces the native backend inside its preset. Failed installation rolls back to native; disable/unload restores native. Hot loading leaves existing agents untouched: restart DSH after active work finishes.
+
 ## Configure it in Settings
 
-Open **Plugins → Faster Compress** from the sidebar to reach its settings page. Save changes to apply them to subsequent preparation and warm-up requests without a restart.
+Open **Plugins → Installed → Faster Compress** from the sidebar. Its settings appear directly on the package detail page. Save changes to apply them to subsequent preparation and warm-up requests without a restart.
 
 | Setting | Default | When to change it |
 | --- | --- | --- |
-| Start preparation at | **85%** | Lower it if summaries often miss the compaction deadline |
-| Warm the new context | **On** | Turn off when your provider does not reuse prefix caches or the extra request is not worthwhile |
+| Start preparation at | **100%** | Uses the preparation threshold; lower it if preparation often reaches the safety limit |
+| Warm the new context | **Off** | Try enabling with long-running tools, spare model capacity, and a reusable prefix cache |
+| Show Compaction History tab | **On** | Saving immediately shows or hides the conversation tab; diagnostics remain recorded |
 | More options → Concurrent background summaries | **1** | Increase for multiple sessions only when the model provider has spare capacity |
 | More options → Warm-up output limit | **1 token** | Usually leave unchanged; accepts 1–8 |
+| Output reservation floor | **0 (automatic)** | Set the actual output cap if metadata omits it, e.g. 32768 for Qwen; otherwise native compaction is used |
+| Input safety margin | **4096 tokens** | Estimation margin before the input limit |
 
-Restoring defaults is staged until you save. Lowering concurrency does not interrupt requests already running.
+Restoring defaults is staged until you save. Lowering concurrency does not interrupt requests already running. Upgrades preserve explicitly saved settings. To adopt the new defaults, set preparation to **100%** and warm-up to **Off**, or restore defaults and save.
 
 ## Where it helps—and its limits
 
 Best suited to long coding sessions, frequent tool use, and tasks that regularly pause for compaction. Short chats or saturated model servers may benefit little.
 
-- **Less waiting, not a zero-wait guarantee.** An unfinished summary still blocks at the threshold. Stopping the turn immediately interrupts that wait.
-- **Warm-up is not free acceleration.** It adds a tiny request. Benefits depend on the provider's cache reuse and eviction; disable it if it does not help.
+- **Less waiting, not a zero-wait guarantee.** An unfinished summary still blocks at the safety limit. Stopping the turn immediately interrupts that wait. New summaries and appended tail messages still need prefill, normally performed by the next real request, so first output can still take time.
+- **Warm-up is not free acceleration.** Output is usually just one token, but a long prompt can require substantial prefill and compete with the main request. Benefits depend on prefix identity and provider cache retention. `maxConcurrent` only limits background summaries; it does not prevent overlap with main requests. Disable warm-up if it does not help.
 - **Some preparation is discarded.** A turn may end, the selected span may change, or the summary may fail to shrink it.
+- **Matching prefixes do not guarantee cache hits.** Hybrid Qwen models also need a retained recurrent checkpoint. Removing competing pruning cannot guarantee a restorable state at the summary cutoff; deployment-side verification remains necessary.
 - **No real-endpoint performance benchmark yet.** The diagram describes the flow, not a measured speedup.
 
 <details>
 <summary>Implementation details and advanced configuration</summary>
 
 - Preparation writes no session events. A commit appends `compaction/start`, `compaction/summary`, the replacement message, and `compaction/end`.
+- Input limit `I = contextWindow − reservedCompletion`; wait limit `W = floor(I − safetyMarginTokens)`; preparation base `T = floor(min(contextWindow × thresholdRatio, I − ceil(headroomTokens / 2), W))`. Preparation starts at `floor(T × eagerRatio)`. With a 262,144 window, 32,768 output reservation, 65,536 headroom and 4,096 safety margin: input limit **229,376**, preparation **196,608**, waiting **225,280**. 196K is a preparation point, not the input capacity.
+- Reservation is the larger of the request/adapter declaration and `outputReserveTokens`. Without either, use native compaction instead of treating an unknown reservation as zero. This setting does not change generation parameters. A global reservation floor may be overly conservative for smaller models.
+- The host owns settings, diagnostics and shared concurrency. The engine replaces the native backend in the original standard/ptc/cordis isolated group, so automatic steps, manual commands and overflow resolve the same service. Preset policies, pruners and other plugins remain in place. No copied preset lists or DSH distribution edits. Minimal, auto-disabled and third-party backends are left alone.
+- Normal background preparation never prunes old tool results. Selected-span changes cancel stale work immediately. Failure, tight budgets and overflow cancel conflicting work before native pruning, remeasurement and synchronous summaries. Native pruning is lossy and may invalidate the cached prefix; originals remain in the session log.
+- History diagnostics include input limit, output reservation and both thresholds; the page indicates inactive integration or missing output metadata.
+- Headroom allows progress but cannot guarantee the summary will finish in time. Failures, noncompactable selections, and overflow retain stock handling; token estimates may differ from provider counts. When concurrency slots are occupied, preparation is deferred only within the safe budget; at the limit, synchronous fallback remains available.
+- Completion callbacks never rewrite an active request's context. Application occurs at the next safe step; even optional warm-up does not delay it, and unfinished warm-up is cancelled on application.
 - Total pressure is checked again after a commit. The prepared commit counts as the first attempt; additional compactions obey the stock `compactionRetries` limit.
 - Warm-up sends checkpoint text before it is persisted. Disable warm-up if every model-visible byte must already be in the session log.
 - Pressure estimates can undercount CJK text. Lower the preparation percentage if preparation starts too late.
 - Stock advanced fields remain configurable on the `faster-compress` row, including `thresholdRatio`, `headroomTokens`, `retainTokens`, and `modelPolicies`. Ordinary use needs none of these edits.
-- The added fields are `eagerRatio` (strictly between 0 and 1), `warmup`, `maxConcurrent`, and `warmupMaxTokens`. The UI's 85% means `eagerRatio: 0.85`.
+- The added fields are `eagerRatio` (greater than 0 and at most 1), `warmup`, `maxConcurrent`, `warmupMaxTokens`, `traceTab`, `outputReserveTokens`, and `safetyMarginTokens`. The UI's 100% means `eagerRatio: 1`.
 
 </details>
 
@@ -94,6 +135,8 @@ npm pack
 The published package includes its browser settings module and both SVG diagrams. Installation requires no build. The server runs JavaScript directly; the browser page uses DSH's native form, save, and reset interactions.
 
 Regression tests cover budgets and selection, cancellation, pressure retries, warm-up and failure fallback, real DSH Session commits and replay, and settings validation and live reads. Model I/O is stubbed; these checks do not replace real-endpoint performance measurements.
+
+Compaction History regressions cover persistence and recovery, session isolation, retention limits, unavailable storage, application-state projection, and RPC lifecycles. See [test instructions](https://github.com/GallenShao/dsh-faster-compress/blob/main/tests/README.md) for isolated browser checks that leave the everyday DSH profile untouched.
 
 ## Release maintenance
 

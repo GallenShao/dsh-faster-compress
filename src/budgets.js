@@ -1,11 +1,9 @@
 /**
  * Pressure budgets and policy resolution.
  *
- * These formulas mirror the budget arithmetic of the upstream basic compaction
- * backend. They are re-derived here rather than imported because that package
- * does not export them, and depending on an unexported path would break on any
- * internal refactor. Keep them in step with
- * `packages/compaction/compaction-basic/src/config.ts`.
+ * These formulas separate background preparation and waiting from the native
+ * synchronous compaction threshold. Policy resolution follows the upstream
+ * basic backend; background timing deliberately uses its own capacity rules.
  *
  * This module is deliberately free of imports so its arithmetic can be tested
  * without a session, a model, or a harness.
@@ -15,18 +13,19 @@
 
 /**
  * @typedef {object} Policy
- * @property {number} thresholdRatio Window fraction for the commit threshold.
- * @property {number} headroomTokens Extra pressure headroom beyond the routed output reservation.
+ * @property {number} thresholdRatio Window fraction for the preparation threshold.
+ * @property {number} headroomTokens Preparation headroom; half is held between preparation and input limit.
  * @property {number} [retainRatio] Recent tail retained verbatim, as a fraction of the message budget.
  * @property {number} [retainTokens] Recent tail retained verbatim, as an absolute budget.
- * @property {number} eagerRatio Fraction of the commit threshold at which a summary is prepared.
+ * @property {number} eagerRatio Fraction of the preparation threshold at which a summary is prepared.
  * @property {readonly Record<string, any>[]} modelPolicies Exact-target overrides.
  */
 
 /**
  * @typedef {object} Budget
- * @property {number} thresholdTokens Pressure at which a compaction is committed.
+ * @property {number} thresholdTokens Preparation threshold before applying eagerRatio.
  * @property {number} eagerTokens Pressure at which a summary is generated in the background.
+ * @property {number} waitTokens Pressure at which unfinished preparation blocks the next request.
  * @property {number} retainTokens Recent tail kept verbatim by a compaction.
  */
 
@@ -65,9 +64,9 @@ export function policyFor(config, target) {
 /**
  * Derive the pressure budgets for one routed model.
  *
- * A commit threshold at or below zero means the routed window cannot hold the
+ * A preparation threshold at or below zero means the routed window cannot hold the
  * reserved output plus the configured headroom. That is a configuration error,
- * and the inherited backend reports it; callers must not silently treat it as
+ * and the caller reports it; callers must not silently treat it as
  * "never compact".
  *
  * @param {Policy} policy Policy for the routed target.
@@ -77,9 +76,11 @@ export function policyFor(config, target) {
  */
 export function budgets(policy, contextWindow, reservedCompletion) {
   const messageBudget = contextWindow - reservedCompletion
+  const waitTokens = Math.floor(messageBudget - (policy.safetyMarginTokens ?? 4096))
   const thresholdTokens = Math.floor(Math.min(
+    waitTokens,
     contextWindow * policy.thresholdRatio,
-    messageBudget - policy.headroomTokens,
+    messageBudget - Math.ceil(policy.headroomTokens / 2),
   ))
   const retainTokens = policy.retainTokens === undefined
     ? Math.floor(messageBudget * policy.retainRatio)
@@ -87,6 +88,10 @@ export function budgets(policy, contextWindow, reservedCompletion) {
   return {
     thresholdTokens,
     eagerTokens: Math.floor(thresholdTokens * policy.eagerRatio),
+    waitTokens,
+    contextWindow,
+    reservedCompletion,
+    inputLimit: messageBudget,
     retainTokens,
   }
 }

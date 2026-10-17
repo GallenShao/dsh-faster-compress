@@ -21,8 +21,8 @@
 <rect x="468" y="444" width="390" height="48" rx="10" fill="#D5EFEB"/><text x="663" y="474" text-anchor="middle" fill="#096661" font-size="18" font-weight="600">后台准备摘要</text>
 <path d="M858 468H916V424" fill="none" stroke="#0A7A78" stroke-width="2" marker-end="url(#arrow)"/>
 <path d="M916 355V421" stroke="#0A7A78" stroke-width="2" stroke-dasharray="4 5"/>
-<text x="916" y="342" text-anchor="middle" font-size="16" font-weight="600" fill="#0A7A78">到阈值，再提交</text>
+<text x="916" y="342" text-anchor="middle" font-size="16" font-weight="600" fill="#0A7A78">就绪后，安全应用</text>
 <path d="M52 530H1148" stroke="#D5E4EA"/>
-<text x="52" y="566" font-size="18" fill="#244B5C">默认提前至压缩阈值的 85% 开始准备 · 支持可选缓存预热</text>
+<text x="52" y="566" font-size="18" fill="#244B5C">达到准备线后后台生成 · 就绪即应用 · 默认无独立预热</text>
 <text x="52" y="596" font-size="14" fill="#6A7E88">流程示意，非性能基准；未准备好时仍需等待。</text>
 </g></svg>

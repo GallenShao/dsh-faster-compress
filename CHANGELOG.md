@@ -4,6 +4,72 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## 0.2.0 — 2026-10-17
+
+Upgrades preserve saved settings. To adopt the new defaults, set preparation
+to 100% and warm-up to Off, then restart DSH after active work finishes.
+
+### Changed
+
+- Replace the actual stock backend inside each Web preset's isolated compaction
+  group; share settings, history and concurrency at the host. Preserve native
+  policies, commands and pruners, roll back failed integration, restore on unload,
+  and leave already-live revisions untouched during hot installation.
+- Keep old tool results intact during normal preparation. Cancel stale summaries
+  on selected-span replacement; cancel conflicting work before native fallback.
+- Add output reservation floor and input safety margin settings. Unknown output
+  metadata uses native compaction. A 262144/32768 window/output configuration
+  starts at 196608 and waits at 225280 with default headroom and safety margin.
+- Show inactive integration and unknown output budgets in Compaction History.
+
+- Start background preparation at a budget-aware preparation threshold by default (`eagerRatio: 1`),
+  then apply a ready summary at the next safe step without waiting for pressure.
+- Disable separate warm-up by default; retain it as an opt-in that never delays
+  application. Explicitly saved settings are preserved on upgrade.
+- Allow progress during preparation until a safety limit that preserves the
+  full output reservation and a separate configurable safety margin. Wait cancellably there,
+  with stock fallback for missing, failed, or stale preparation and busy slots.
+- Update bilingual settings, history explanations, README diagrams, and budget
+  diagnostics to distinguish preparation from safety-limit waiting.
+
+### Added
+
+- Reasoning settings, provider cache-read usage, and logical warm-up prefix
+  verification in Compaction History, with unknown cache counts kept unknown.
+- Host-observed recovery latency after compaction: blocking-to-first-output,
+  apply-to-first-output, and output-producing main-request TTFT, with separate
+  reasoning, text, and tool delta timings and bounded retry diagnostics.
+- Verify checkpoint inclusion at DSH's marked main-request boundary; exclude
+  summary/warm-up calls and preserve unknown timings across restart or cancellation.
+- Per-conversation Compaction History view with live history, application state,
+  summaries and original excerpts, stage timings, usage, and error diagnostics.
+- Live `traceTab` setting, bilingual copy, theme-aware responsive layout,
+  filters, search, copy, and keyboard-accessible content tabs.
+- Bounded local diagnostic journals and native compaction history recovery
+  through DSH's authenticated gateway; no extra session event types.
+- Regression coverage for journal recovery, state projection, storage failures,
+  reload fallback, and client registration, plus an isolated browser fixture.
+
+### Fixed
+
+- Keep the history service mounted after dependency injection: returning its
+  child Fiber was an invalid Cordis plugin effect and withdrew the strict RPC
+  definition. Cover startup, preset replacement, strict gateway reads, host
+  unload/reload and invalid-input rejection with the real Typert registry.
+- Inherit conversation reasoning effort in same-model summaries and warm-up,
+  including manual compaction, overflow recovery, and inline fallback. Preserve
+  stock summary prompts and independently routed models' defaults.
+- Invalidate warm-up when its route, reasoning effort, or logical prefix changes;
+  preserve usable summaries and report streamed warm-up errors as failures.
+- Render settings on the installed package's detail page instead of creating
+  a separate card among official plugin settings.
+- Improve settings spacing, readable form width, and toggle label hierarchy.
+- Fall back to stock compaction when plugin unload cancels preparation during
+  a live turn, while preserving explicit turn cancellation.
+- Discard late summary results from providers that ignore cancellation.
+
 ## 0.1.0
 
 ### Fixed

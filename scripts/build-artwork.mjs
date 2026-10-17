@@ -4,15 +4,15 @@ const copy = {
   zh: {
     title: '少等摘要，多做一步。', subtitle: '提前准备上下文摘要，把压缩等待藏进工作的间隙。',
     before: '原版压缩', after: 'Faster Compress', request: '模型请求', tool: '工具执行', next: '继续推进',
-    wait: '等待摘要生成', background: '后台准备摘要', commit: '到阈值，再提交',
-    footer: '默认提前至压缩阈值的 85% 开始准备 · 支持可选缓存预热',
+    wait: '等待摘要生成', background: '后台准备摘要', commit: '就绪后，安全应用',
+    footer: '达到准备线后后台生成 · 就绪即应用 · 默认无独立预热',
     note: '流程示意，非性能基准；未准备好时仍需等待。',
   },
   en: {
     title: 'Less waiting. More progress.', subtitle: 'Prepare context summaries while the agent keeps working.',
     before: 'Stock compaction', after: 'Faster Compress', request: 'Model request', tool: 'Tool execution', next: 'Keep working',
-    wait: 'Wait for the summary', background: 'Prepare summary in background', commit: 'Commit at threshold',
-    footer: 'Prepare at 85% of the compaction threshold by default · Optional cache warm-up',
+    wait: 'Wait for the summary', background: 'Prepare summary in background', commit: 'Apply when ready',
+    footer: 'Start at the preparation threshold · Apply when ready · No separate warm-up by default',
     note: 'Illustration, not a benchmark. Unfinished summaries still require a wait.',
   },
 }
