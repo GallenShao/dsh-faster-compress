@@ -6,6 +6,19 @@
 
 发布必须能追溯到确定的 Git 提交、annotated tag 和 npm tarball 校验值。按 [AGENTS.md](AGENTS.md) 执行完整流程；未发布内容写入 `CHANGELOG.md` 的 `Unreleased`。既有标签保持不变，发布后补充记录使用单独的文档提交。
 
+## 0.2.0 · 2026-10-17
+
+- 审批：项目所有者明确批准版本 `0.2.0`、Git 推送及 npm 发布，并要求公开仓库和 Git 历史不包含本机排障资料。
+- npm：[`dsh-faster-compress@0.2.0`](https://www.npmjs.com/package/dsh-faster-compress/v/0.2.0)
+- Git 提交：[`41e22ece70256a7a6d8c9c5bc9832133d0a1b6ec`](https://github.com/GallenShao/dsh-faster-compress/commit/41e22ece70256a7a6d8c9c5bc9832133d0a1b6ec)
+- Git 标签：[`v0.2.0`](https://github.com/GallenShao/dsh-faster-compress/tree/v0.2.0)，annotated tag；发布后保持不变。
+- tarball SHA-1：`bd6190cf005f58fe26d4761a572d2e133e6d7ffb`
+- tarball integrity：`sha512-mPcanKIichYMCu3sXz0F/fV3QpkeY9ZfY0jRy7nWu3Gtt4zAPYVQk8SBXkFus1aaZMMj07tzzU+X7H3HNtUWDQ==`
+- 变更：压缩历史与应用后响应计时、就绪即应用的后台摘要、安全等待和原生回退、Web preset 隔离组接入、请求推理参数继承及严格历史 RPC 生命周期修复。默认准备比例 100%、独立预热关闭；升级保留已保存设置。
+- 验证：114 项回归测试、构建、语法及差异检查；确切 tarball 在隔离 DSH 0.2.0-rc.2 中启动并成功调用严格历史 RPC。模型 I/O 使用测试桩，未宣称真实端点性能收益。
+- 开源审查：未推送开发提交整理后发布，本机排障报告已移出；从 GitHub 全新镜像克隆审查全部 13 个发布时可达提交与 80 个唯一文件对象，未发现排障报告、本机绝对路径、真实会话标识或匹配凭据模式。所有 26 个 npm 文件与发布提交逐字节一致，测试夹具和本地资料不进入 npm 包。既有公开历史及 `v0.1.0` 保持不变。
+- 线上验证：npm `latest` 为 `0.2.0`，作者为项目所有者；远程 tarball 的 SHA-1、integrity 及完整字节均与发布物一致。中英文 README 的版本化图片已从 GitHub 下载核对。
+
 ## 0.1.0 · 2026-10-17
 
 - 审批：用户明确要求尝试发布 npm，并在登录、验证后要求重试；随后明确要求补建 Git 记录并推送至指定仓库。
