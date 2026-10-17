@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import contract from './trace-contract.cjs'
+import { projectContextUsage } from './usage.js'
 
 export const TRACE_LIMIT = 80
 const TEXT_LIMIT = 24000
@@ -232,6 +233,7 @@ export function projectTrace(events, telemetry = []) {
       if (!record.error) delete record.reason
     }
   }
+  projectContextUsage(events, records)
   const result = [...records.values()].sort((a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id))
   return { records: result.slice(0, TRACE_LIMIT), total: result.length, limit: TRACE_LIMIT }
 }

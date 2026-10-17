@@ -178,5 +178,18 @@
   "safetyMarginTokensHint": "Default 4096. Stop growing before the model input limit to await preparation or use native compaction.",
   "safetyMarginTokensInvalid": "Enter an integer of at least 0.",
   "trace.integrationNative": "Background compaction is inactive for this session; using the native backend. Details:",
-  "trace.budgetUnknown": "Output reservation is unknown; using native compaction. Set the output reservation floor in plugin settings."
+  "trace.budgetUnknown": "Output reservation is unknown; using native compaction. Set the output reservation floor in plugin settings.",
+  "trace.contextActual": "Main-request context · measured",
+  "trace.contextPending": "Awaiting next main-request usage",
+  "trace.contextNotApplied": "Context has not been replaced",
+  "trace.contextUnavailable": "Usage unavailable for one or both requests",
+  "trace.contextMeasured": "Last response before → first response after replacement",
+  "trace.contextHint": "Input counts reported by the model, including cached tokens. New messages, tool results, or configuration changes may differ between requests; this is observed context change, not exact compaction savings.",
+  "trace.summaryInput": "Summary request input · measured",
+  "trace.summaryOutput": "Summary request output · measured",
+  "trace.summaryInputHint": "Includes system prompt, tool definitions, and summary instructions",
+  "trace.summaryOutputHint": "May include reasoning; not the size of the stored summary",
+  "trace.reportedUsage": "Model-reported; — when unavailable",
+  "trace.spanEstimated": "Replaced span → replacement message · estimated",
+  "trace.spanEstimateHint": "Character estimates are approximate and may undercount CJK text; excluded from measured metrics"
 }

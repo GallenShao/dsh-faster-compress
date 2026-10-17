@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.2.1 — 2026-10-17
+
+### Changed
+
+- Show model-reported main-request input before and after context replacement as
+  the primary history metric, including cache reads/writes. Explain that new
+  messages and tool results make this observed change, not exact token savings.
+- Show summary request input, output, and cache reads separately. Output may
+  include reasoning and is not the stored checkpoint size. Move the estimated
+  replaced-span/checkpoint comparison into supplementary information.
+- Recover measurements for existing history from native session events; show
+  pending or unavailable usage explicitly rather than substituting estimates.
+  Preserve compression selection, scheduling, and standard request behavior.
+
 ## 0.2.0 — 2026-10-17
 
 Upgrades preserve saved settings. To adopt the new defaults, set preparation

@@ -178,5 +178,18 @@
   "safetyMarginTokensHint": "默认 4096。在模型输入上限之前停止继续增长，等待摘要或回退原生压缩。",
   "safetyMarginTokensInvalid": "请输入不小于 0 的整数。",
   "trace.integrationNative": "当前会话未启用后台压缩，沿用原生后端。详情：",
-  "trace.budgetUnknown": "输出预留未知，暂用原生压缩。请在插件设置填写模型的输出预留下限。"
+  "trace.budgetUnknown": "输出预留未知，暂用原生压缩。请在插件设置填写模型的输出预留下限。",
+  "trace.contextActual": "主请求上下文 · 实测",
+  "trace.contextPending": "等待后续主请求实测",
+  "trace.contextNotApplied": "尚未替换上下文",
+  "trace.contextUnavailable": "部分请求未提供 usage",
+  "trace.contextMeasured": "替换前最近一次 → 替换后首次回复",
+  "trace.contextHint": "按模型返回的 usage 统计输入，包含缓存 token。前后请求可能包含新增消息、工具结果或配置变化；这是实际上下文变化，不是精确的压缩节省量。",
+  "trace.summaryInput": "摘要请求输入 · 实测",
+  "trace.summaryOutput": "摘要请求输出 · 实测",
+  "trace.summaryInputHint": "包含系统提示、工具定义及摘要指令",
+  "trace.summaryOutputHint": "可能包含推理，不等于写回摘要的大小",
+  "trace.reportedUsage": "模型报告；未提供时显示 —",
+  "trace.spanEstimated": "被替换片段 → 替换消息 · 估算",
+  "trace.spanEstimateHint": "字符估算仅供参考，尤其可能低估中文；不用于实测指标"
 }

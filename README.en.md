@@ -8,11 +8,11 @@
 ![DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.0--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.0/assets/overview-en.svg)
+![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.1/assets/overview-en.svg)
 
 Long conversations in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) need context compaction. The stock backend writes a summary before the next step can begin. **Faster Compress starts that work earlier, in the background**: start at the preparation threshold, let the task continue within safe headroom, and apply a ready summary before the next model request. Separate warm-up is off by default.
 
-> **0.2.0** adds Compaction History, post-application response timings, and safer background preparation. Upgrades preserve saved settings; to adopt the new defaults, set preparation to **100%** and warm-up to **Off**.
+> **0.2.1** shows context changes using provider-reported input counts, separates summary request usage, and recovers counts for existing history. Upgrades preserve saved settings; recommended preparation is **100%**, with warm-up **Off**.
 
 ## Install with one package name
 
@@ -68,6 +68,8 @@ Same-model summaries (including manual compaction, overflow recovery, and inline
 Compaction History shows provider-reported cache-read tokens for summaries, warm-up, and subsequent request attempts, plus reasoning settings. Missing cache counts remain `—`. Warm-up completion, logical prefix matching, and actual cache hits are separate observations; TTFT is not a measurement of prefill alone.
 
 Response durations use the host's monotonic clock. They include subsequent processing, model queuing, and request-chain waiting, but exclude browser delivery and rendering. First output follows DSH's first non-empty text, reasoning, or tool delta definition; per-kind times ignore whitespace-only text. Observation covers the first main request after application and its failed retries, then stops when that request completes. Later tool-loop requests are not accumulated; tool-only responses leave text timing as `—`. TTFT belongs to the attempt that actually produced the first output, while total waiting includes prior failures and retries. Each record keeps the latest eight attempts. Manual `/compact` can leave an idle interval before the next user input, so post-application timing can include that interval but compaction-blocking time stays unset. Restart or unload interrupts unfinished observations; historical first-token times are never inferred from completion timestamps.
+
+The primary metric uses model-reported usage to compare input tokens (including cached tokens) for the last main response before replacement and the first response afterward. New messages, tool results, and configuration changes may affect the difference, so it is not exact compaction savings. Summary request input, output, and cache reads are shown separately; output may include reasoning and is not the stored summary size. Character estimates for the replaced span and checkpoint remain supplementary. Pending and missing usage stay explicit, never replaced with estimates. Existing history can recover these counts from native session events.
 
 Diagnostics live separately in `$DSH_HOME/data/faster-compress/traces/` (default `~/.dsh/data/faster-compress/traces/`), without adding session events. Each conversation retains up to 80 background records, with original excerpts capped at 12,000 characters and summaries at 24,000; truncation is indicated. Only text is retained, without attachments. Common credential patterns are masked in errors; original excerpts and summaries preserve conversation content. Storage failure does not block compaction and is reported in the view.
 

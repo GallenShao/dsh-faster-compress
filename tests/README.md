@@ -61,3 +61,7 @@ Stop the test host and remove its fixture patch or temporary profile when done.
 Preset integration regressions load the installed standard/ptc/cordis compaction groups through the real Cordis Loader and Preset Registry, dispatch AgentRegistry creation and scoped pre-step events, verify command resolution, and check rollback, unload restoration, minimal/custom/disabled policies and hot-load deferral. The surrounding Agent loop/model and command transport are test fixtures, not a live inference benchmark.
 
 接入回归加载实际安装的 Web preset 压缩组，使用真实 Loader、Preset Registry、AgentRegistry 创建事件和作用域步骤事件；验证手动命令解析、回滚、卸载恢复及 minimal/自定义/禁用策略。外围模型循环与命令传输为测试桩，没有对日常服务发送推理请求。
+
+用量回归覆盖缓存读取与写入计数、原生历史恢复、替换前最近一次和替换后首次主请求、缺失 usage、检查点被替换及经核验的实时 usage；摘要输出不混入上下文输入，估算不补齐实测。
+
+Usage regressions cover cache reads/writes, native historical reconstruction, adjacent main-request measurements, missing usage, superseded checkpoints, and verified live usage. Summary output is not counted as context input, and estimates never fill gaps in measured usage.
