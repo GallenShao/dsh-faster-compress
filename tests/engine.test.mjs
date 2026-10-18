@@ -17,10 +17,10 @@ const envelope = () => ({
 })
 
 /** Real session projection/validation and stock compaction; only I/O is stubbed. */
-function harness(config = {}) {
+function harness(config = {}, sessionId = 'regression') {
   const listeners = new Map()
   const disposers = []
-  const session = Session.create('regression')
+  const session = Session.create(sessionId)
   session.append('turn/start', { turn: 1 })
   session.append('request/header', {
     turn: 1, step: 1, reason: 'initial',
@@ -171,7 +171,7 @@ test('cancellation interrupts a pending commit even when the provider ignores ab
   assert.deepEqual(h.records(), [], 'a late response cannot commit a discarded summary')
 })
 
-for (const lifecycle of ['idle', 'disposed', 'unload', 'turn-abort']) {
+for (const lifecycle of ['disposed', 'unload', 'turn-abort']) {
   test(`${lifecycle} cancels background work and leaves no compaction records`, async () => {
     const h = harness()
     let backgroundSignal
@@ -180,7 +180,6 @@ for (const lifecycle of ['idle', 'disposed', 'unload', 'turn-abort']) {
       return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
     }
     await h.compact()
-    if (lifecycle === 'idle') h.emit('agent/status', { agent: h.agent, status: 'idle' })
     if (lifecycle === 'disposed') h.emit('agent/disposed', { agent: h.agent })
     if (lifecycle === 'unload') h.dispose()
     if (lifecycle === 'turn-abort') h.turn.abort()
@@ -736,4 +735,203 @@ test('invalid output/safety budgets stop before issuing another model request', 
 test('native policy cannot silently bypass a tighter plugin safety limit', async () => {
   const h = defaultFlow({ thresholdRatio: 0.99, headroomTokens: 100, safetyMarginTokens: 300 })
   await assert.rejects(h.compact(), /native fallback did not reduce input below the safety limit/)
+})
+
+for (const readyBeforeEnd of [false, true]) {
+  test(`normal turn completion preserves ${readyBeforeEnd ? 'ready' : 'running'} summary for the next turn`, async () => {
+    const h = harness({ warmup: false })
+    const generated = Promise.withResolvers()
+    let calls = 0, signal
+    h.engine.summarize = (_input, _agent, nextSignal) => {
+      calls += 1; signal = nextSignal
+      return generated.promise
+    }
+    await h.compact()
+    if (readyBeforeEnd) { generated.resolve(envelope()); await setImmediate() }
+    h.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    h.emit('agent/status', { agent: h.agent, status: 'idle' })
+    h.turn.abort() // cleanup of an old turn must not kill retained work
+    assert.equal(signal.aborted, false)
+    generated.resolve(envelope())
+    await setImmediate()
+    assert.equal((await h.engine.trace.read(h.session.id))[0].status, 'ready')
+    assert.equal(h.records().length, 0, 'completion alone cannot commit')
+    h.session.append('turn/start', { turn: 2 })
+    const tail = h.append(25)
+    await h.compact(new AbortController().signal)
+    assert.equal(calls, 1)
+    assert.equal(h.records().filter(e => e.type === 'compaction/summary').length, 1)
+    assert.ok(h.session.surface.nodes.includes(tail.seq))
+    h.dispose()
+  })
+}
+
+for (const lifecycle of ['idle', 'disposed', 'turn-end', 'unload']) {
+  test(`late capacity resolution cannot admit work after ${lifecycle}`, async () => {
+    const h = harness({ warmup: false })
+    const info = Promise.withResolvers()
+    h.ctx.llm.resolveModelInfo = () => info.promise
+    h.tool()
+    if (lifecycle === 'idle') h.emit('agent/status', { agent: h.agent, status: 'idle' })
+    if (lifecycle === 'disposed') h.emit('agent/disposed', { agent: h.agent })
+    if (lifecycle === 'turn-end') h.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    if (lifecycle === 'unload') h.dispose()
+    info.resolve({ context: { contextWindow: 1000 } })
+    await setImmediate()
+    assert.equal(h.summaries.length, 0)
+    h.dispose()
+  })
+}
+
+test('adapter invalidation during resolution cannot repopulate old capacity', async () => {
+  const h = harness({ warmup: false })
+  const stale = Promise.withResolvers()
+  let calls = 0
+  h.ctx.llm.resolveModelInfo = () => ++calls === 1 ? stale.promise : Promise.resolve({ context: { contextWindow: 1100 } })
+  h.tool()
+  h.emit('llm/adapters-updated')
+  stale.resolve({ context: { contextWindow: 1000 } })
+  await setImmediate()
+  assert.equal(calls, 2)
+  // 700 tokens is below the new preparation line (748).
+  assert.equal(h.summaries.length, 0)
+  h.append(100)
+  await h.compact()
+  assert.equal((await h.engine.trace.read(h.session.id))[0].contextWindow, 1100)
+  assert.equal(calls, 2)
+  h.dispose()
+})
+
+test('an old admission cannot restart work after idle followed immediately by a new turn', async () => {
+  const h = harness({ warmup: false })
+  const info = Promise.withResolvers()
+  h.ctx.llm.resolveModelInfo = () => info.promise
+  h.tool()
+  h.emit('agent/status', { agent: h.agent, status: 'idle' })
+  h.emit('session/event', h.session, { type: 'turn/start' })
+  info.resolve({ context: { contextWindow: 1000 } })
+  await setImmediate()
+  assert.equal(h.summaries.length, 0)
+  await h.compact(new AbortController().signal)
+  assert.equal(h.summaries.length, 1)
+  h.dispose()
+})
+
+test('explicit cancellation of a resumed turn aborts its retained summary', async () => {
+  const h = harness({ warmup: false })
+  const generated = Promise.withResolvers()
+  let signal
+  h.engine.summarize = (_input, _agent, value) => { signal = value; return generated.promise }
+  await h.compact()
+  h.emit('agent/status', { agent: h.agent, status: 'idle' })
+  const next = new AbortController()
+  await h.compact(next.signal)
+  next.abort()
+  assert.equal(signal.aborted, true)
+  generated.resolve(envelope())
+  await setImmediate()
+  assert.equal(h.records().length, 0)
+  h.dispose()
+})
+
+test('idle retention is bounded and unload releases all retained preparations', async () => {
+  const h = harness({ warmup: false })
+  for (let index = 0; index < 25; index++) {
+    const other = harness({ auto: false, warmup: false }, `retained-${index}`)
+    h.emit('agent/created', { agent: other.agent })
+    await h.engine.compactIfNeeded(other.agent, 'pressure', other.turn.signal)
+    await setImmediate()
+    h.emit('agent/status', { agent: other.agent, status: 'idle' })
+    other.dispose()
+  }
+  assert.equal(h.summaries.length, 25)
+  assert.equal((await h.engine.trace.read('retained-0'))[0].reason, 'retention-limit')
+  assert.equal((await h.engine.trace.read('retained-1'))[0].status, 'ready')
+  assert.equal((await h.engine.trace.read('retained-24'))[0].status, 'ready')
+  h.dispose()
+  assert.ok(h.summaries.every(call => call.signal.aborted))
+  assert.equal((await h.engine.trace.read('retained-24'))[0].reason, 'unloaded')
+})
+
+test('tail replacements avoid whole-surface pricing but commit still rejects repriced selections', async () => {
+  const h = harness({ warmup: false })
+  await h.compact()
+  await setImmediate()
+  const measure = h.ctx.tokenMeter.measure
+  let measurements = 0
+  h.ctx.tokenMeter.measure = (...args) => { measurements++; return measure(...args) }
+  const tail = h.session.surface.nodes.at(-1)
+  h.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'new tail' }], source: { kind: 'user' } }), {
+    surfaceOp: { op: 'replace', startSeq: tail, endSeq: tail }, sourceEventSeqs: [tail],
+  })
+  assert.equal(measurements, 0)
+  assert.equal((await h.engine.trace.read(h.session.id))[0].status, 'ready')
+  // A price change outside an event still cannot evade the commit-time check.
+  h.ctx.tokenMeter.measure = (...args) => {
+    const result = measure(...args)
+    result.nodes[0].tokens += 1
+    return result
+  }
+  await h.compact()
+  assert.equal(h.records().length, 0)
+  assert.equal((await h.engine.trace.read(h.session.id))[0].reason, 'stale')
+  h.dispose()
+})
+
+test('a stale metadata failure does not create a new diagnostic after disposal', async () => {
+  const h = harness({ warmup: false })
+  const info = Promise.withResolvers()
+  h.ctx.llm.resolveModelInfo = () => info.promise
+  h.tool()
+  h.emit('agent/disposed', { agent: h.agent })
+  info.reject(new Error('late adapter failure'))
+  await setImmediate()
+  assert.deepEqual(await h.engine.trace.read(h.session.id), [])
+  h.dispose()
+})
+
+test('route changes during metadata resolution are priced against the new route', async () => {
+  const h = harness({ warmup: false })
+  const old = Promise.withResolvers(), resolved = []
+  h.ctx.llm.resolveModelInfo = (_provider, model) => {
+    resolved.push(model)
+    return model === 'test' ? old.promise : Promise.resolve({ context: { contextWindow: 1100 } })
+  }
+  h.tool()
+  route(h, { model: 'new' })
+  old.resolve({ context: { contextWindow: 1000 } })
+  await setImmediate()
+  assert.deepEqual(resolved, ['test', 'new'])
+  assert.equal(h.summaries.length, 0)
+  h.append(100)
+  await h.compact()
+  assert.equal((await h.engine.trace.read(h.session.id))[0].contextWindow, 1100)
+  assert.equal(h.session.requestHeader().config.model, 'new')
+  h.dispose()
+})
+
+test('normal completion cancels optional warmup without discarding the ready summary', async () => {
+  const h = harness({ warmup: true })
+  const stopped = Promise.withResolvers()
+  let warmSignal
+  h.ctx.llm.stream = async function* (request) {
+    warmSignal = request.signal
+    await new Promise(resolve => request.signal.addEventListener('abort', resolve, { once: true }))
+    stopped.resolve()
+  }
+  await h.compact()
+  await setImmediate()
+  h.tool()
+  assert.ok(warmSignal)
+  h.emit('agent/status', { agent: h.agent, status: 'idle' })
+  await stopped.promise
+  await setImmediate()
+  assert.equal(warmSignal.aborted, true)
+  const record = (await h.engine.trace.read(h.session.id))[0]
+  assert.equal(record.status, 'ready')
+  assert.equal(record.warmup.status, 'cancelled')
+  await h.compact(new AbortController().signal)
+  assert.equal(h.summaries.length, 1)
+  assert.equal(h.records().filter(e => e.type === 'compaction/summary').length, 1)
+  h.dispose()
 })

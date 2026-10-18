@@ -129,3 +129,53 @@ test('diagnostics redact common credential forms and bound errors', () => {
   assert.equal(traceError(new Error('Bearer abc123 api_key=secret token=private')), '[redacted] api_key=[redacted] token=[redacted]')
   assert.ok(traceError('x'.repeat(5000)).length <= 2000)
 })
+
+test('bounded excerpts preserve formatting and stop reading once truncation is known', async () => {
+  const { sourceExcerpt, textOf } = await import('../src/trace.js')
+  const messages = [[], [{ type: 'text', text: '' }], [{ type: 'text', text: 'a' }, { type: 'text', text: '' }, { type: 'text', text: 'b' }], [{ type: 'image' }], [{ type: 'text', text: 'c' }]]
+  assert.deepEqual(sourceExcerpt(messages), { original: messages.map(textOf).filter(Boolean).join('\n\n'), originalTruncated: false })
+  assert.equal(sourceExcerpt([[{ type: 'text', text: 'a'.repeat(12000) }]]).originalTruncated, false)
+  function* huge() {
+    yield [{ type: 'text', text: 'a'.repeat(400000) }]
+    throw new Error('should not derive the rest of the span')
+  }
+  const excerpt = sourceExcerpt(huge())
+  assert.equal(excerpt.original.length, 12000)
+  assert.equal(excerpt.originalTruncated, true)
+  const journal = new TraceJournal({ directory: null })
+  journal.begin('session', { id: 'one', ...excerpt })
+  assert.equal((await journal.read('session'))[0].originalTruncated, true)
+})
+
+test('history cache avoids unchanged snapshots but invalidates on events, diagnostics and session replacement', async () => {
+  const journal = new TraceJournal({ directory: null })
+  let snapshots = 0, disposed = 0, observations = 0, cursor = 4, header = {}
+  const service = { journal, integration: () => undefined, ctx: { sessionQuery: {
+    observeSession: async () => {
+      observations++
+      return { source: 'live', header, cursor,
+        get events() { snapshots++; return events },
+        [Symbol.dispose]() { disposed++ },
+      }
+    },
+  } } }
+  const read = () => TraceService.prototype.read.call(service, 'session', new AbortController().signal)
+  await read(); await read()
+  assert.equal(snapshots, 1)
+  assert.equal(observations, 2, 'cached data never bypasses session resolution')
+  cursor++
+  await read()
+  assert.equal(snapshots, 2)
+  journal.begin('session', { id: 'diagnostic' })
+  await read()
+  assert.equal(snapshots, 3)
+  journal.update('session', 'diagnostic', { status: 'ready' })
+  assert.equal((await read()).records.find(r => r.id === 'diagnostic').status, 'ready')
+  assert.equal(snapshots, 4)
+  header = {}
+  await read()
+  assert.equal(snapshots, 5)
+  assert.equal(disposed, observations)
+  service.ctx.sessionQuery.observeSession = async () => { throw new Error('deleted') }
+  await assert.rejects(read(), /deleted/)
+})

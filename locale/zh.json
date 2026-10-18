@@ -88,13 +88,13 @@
   "trace.updated": "更新于",
   "trace.status.preparing": "准备中",
   "trace.outcome.preparing": "摘要正在后台生成",
-  "trace.explain.preparing": "原始上下文尚未替换。",
+  "trace.explain.preparing": "正在后台准备摘要。正常回合结束后允许完成，下一轮继续对话时再应用。",
   "trace.status.waiting": "等待摘要",
   "trace.outcome.waiting": "已到安全等待线，正在等待摘要",
   "trace.explain.waiting": "当前步骤在等待后台生成完成，可停止回合中断等待。",
   "trace.status.ready": "待应用",
   "trace.outcome.ready": "摘要就绪，尚未应用",
-  "trace.explain.ready": "摘要已就绪，将在下一次模型请求前的安全步骤边界应用，保留期间新增的消息。",
+  "trace.explain.ready": "摘要已准备好，等待下一安全步骤应用；正常回合结束后保留，继续对话时重新校验。",
   "trace.status.applied": "已应用",
   "trace.outcome.applied": "摘要已应用，仍在当前上下文中",
   "trace.explain.applied": "检查点替换了选中的历史，之后新增的消息保持不变。",
@@ -191,5 +191,6 @@
   "trace.summaryOutputHint": "可能包含推理，不等于写回摘要的大小",
   "trace.reportedUsage": "模型报告；未提供时显示 —",
   "trace.spanEstimated": "被替换片段 → 替换消息 · 估算",
-  "trace.spanEstimateHint": "字符估算仅供参考，尤其可能低估中文；不用于实测指标"
+  "trace.spanEstimateHint": "字符估算仅供参考，尤其可能低估中文；不用于实测指标",
+  "trace.reason.retention-limit": "跨回合保留名额已满，较早的准备结果已释放；需要时会重新准备或使用原版压缩。"
 }

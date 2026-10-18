@@ -1,6 +1,6 @@
 {
   "name": "dsh-faster-compress",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Prepare DeepSeek Harness context summaries in the background to reduce compaction pauses.",
   "author": "gallenshao <shaojialun@pku.edu.cn>",
   "keywords": [

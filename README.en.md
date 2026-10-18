@@ -8,11 +8,11 @@
 ![DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.0--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.1/assets/overview-en.svg)
+![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.2/assets/overview-en.svg)
 
 Long conversations in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) need context compaction. The stock backend writes a summary before the next step can begin. **Faster Compress starts that work earlier, in the background**: start at the preparation threshold, let the task continue within safe headroom, and apply a ready summary before the next model request. Separate warm-up is off by default.
 
-> **0.2.1** shows context changes using provider-reported input counts, separates summary request usage, and recovers counts for existing history. Upgrades preserve saved settings; recommended preparation is **100%**, with warm-up **Off**.
+> **0.2.2** retains prepared summaries across normal turn completion, revalidates them when the conversation resumes, and fixes background-task and capacity-cache races. Upgrades preserve saved settings; recommended preparation is **100%**, with warm-up **Off**.
 
 ## Install with one package name
 
@@ -115,6 +115,8 @@ Best suited to long coding sessions, frequent tool use, and tasks that regularly
 - Normal background preparation never prunes old tool results. Selected-span changes cancel stale work immediately. Failure, tight budgets and overflow cancel conflicting work before native pruning, remeasurement and synchronous summaries. Native pruning is lossy and may invalidate the cached prefix; originals remain in the session log.
 - History diagnostics include input limit, output reservation and both thresholds; the page indicates inactive integration or missing output metadata.
 - Headroom allows progress but cannot guarantee the summary will finish in time. Failures, noncompactable selections, and overflow retain stock handling; token estimates may differ from provider counts. When concurrency slots are occupied, preparation is deferred only within the safe budget; at the limit, synchronous fallback remains available.
+- Normal turn completion preserves existing preparation: running summaries may finish, and ready results are revalidated and applied at a safe step when the conversation resumes. Idle sessions are never rewritten. Cancellation, abnormal completion, selected-span replacement, session disposal, and plugin unload still cancel preparation. Each engine retains preparations for at most 24 idle sessions, releasing the oldest when full. Unapplied results are not restored across process restarts.
+- History uses DSH's authenticated host access boundary, without additional per-user ownership isolation. `observeSession` resolves and validates a session; it does not authorize a user. Excerpts are also stored in local diagnostic files; hiding the tab does not delete them. When cleaning up sensitive sessions, also remove their diagnostic files from the directory described above.
 - Completion callbacks never rewrite an active request's context. Application occurs at the next safe step; even optional warm-up does not delay it, and unfinished warm-up is cancelled on application.
 - Total pressure is checked again after a commit. The prepared commit counts as the first attempt; additional compactions obey the stock `compactionRetries` limit.
 - Warm-up sends checkpoint text before it is persisted. Disable warm-up if every model-visible byte must already be in the session log.

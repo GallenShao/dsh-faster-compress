@@ -88,13 +88,13 @@
   "trace.updated": "Updated",
   "trace.status.preparing": "Preparing",
   "trace.outcome.preparing": "Summary is being prepared",
-  "trace.explain.preparing": "The original context has not been replaced.",
+  "trace.explain.preparing": "Preparing a summary in the background. It may finish after a normal turn ends and be applied when the conversation resumes.",
   "trace.status.waiting": "Waiting",
   "trace.outcome.waiting": "At the safety limit, waiting for the summary",
   "trace.explain.waiting": "The step is waiting for preparation. Stopping the turn interrupts the wait.",
   "trace.status.ready": "Ready",
   "trace.outcome.ready": "Ready, not yet applied",
-  "trace.explain.ready": "Ready to apply at the next safe boundary before a model request, preserving messages appended during preparation.",
+  "trace.explain.ready": "Summary ready for the next safe step. Retained across normal turn completion and revalidated when the conversation resumes.",
   "trace.status.applied": "Applied",
   "trace.outcome.applied": "Applied and still in the current context",
   "trace.explain.applied": "The checkpoint replaced the selected span; newer messages remain intact.",
@@ -191,5 +191,6 @@
   "trace.summaryOutputHint": "May include reasoning; not the size of the stored summary",
   "trace.reportedUsage": "Model-reported; — when unavailable",
   "trace.spanEstimated": "Replaced span → replacement message · estimated",
-  "trace.spanEstimateHint": "Character estimates are approximate and may undercount CJK text; excluded from measured metrics"
+  "trace.spanEstimateHint": "Character estimates are approximate and may undercount CJK text; excluded from measured metrics",
+  "trace.reason.retention-limit": "The cross-turn retention limit was reached. An older preparation was released; preparation or native compaction remains available when needed."
 }

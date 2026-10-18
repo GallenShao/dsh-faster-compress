@@ -42,6 +42,26 @@ export function textOf(content) {
   return (Array.isArray(content) ? content : []).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
 }
 
+/** Construct at most the excerpt plus one character proving truncation. */
+export function sourceExcerpt(contents) {
+  let original = ''
+  for (const content of contents) {
+    let message = '', first = true
+    const remaining = SOURCE_LIMIT + 1 - original.length
+    for (const block of Array.isArray(content) ? content : []) {
+      if (block.type !== 'text') continue
+      if (!first) message += '\n'
+      first = false
+      message += (block.text ?? '').slice(0, Math.max(0, remaining - message.length))
+      if (message.length >= remaining) break
+    }
+    if (!message) continue
+    original += (original ? '\n\n' : '') + message
+    if (original.length > SOURCE_LIMIT) return { original: original.slice(0, SOURCE_LIMIT), originalTruncated: true }
+  }
+  return { original, originalTruncated: false }
+}
+
 export function traceError(error) {
   return (error instanceof Error ? error.message : String(error))
     .replace(/\b(?:Bearer\s+|sk-)[a-zA-Z0-9_.\-/+=]+/gi, '[redacted]')
@@ -113,7 +133,7 @@ export class TraceJournal {
   begin(sessionId, record) {
     const cell = this.cell(sessionId)
     const original = clipped(record.original, SOURCE_LIMIT)
-    cell.records.push({ ...record, original: original.text, originalTruncated: original.truncated,
+    cell.records.push({ ...record, original: original.text, originalTruncated: original.truncated || record.originalTruncated === true,
       generation: this.generation, startedAt: this.clock(), updatedAt: this.clock(), status: 'preparing' })
     cell.records = cell.records.slice(-TRACE_LIMIT)
     this.save(sessionId)
@@ -134,9 +154,9 @@ export class TraceJournal {
   }
 
   save(sessionId) {
-    if (this.directory === null) return
     const cell = this.cell(sessionId)
     cell.revision += 1
+    if (this.directory === null) return
     if (this.writes.has(sessionId)) return
     const task = (async () => {
       await this.load(sessionId)
@@ -168,11 +188,13 @@ export class TraceJournal {
     }
   }
 
-  async read(id) {
-    const records = (await this.load(id)).records.map(record => ({ ...record }))
+  async snapshot(id) {
+    const cell = await this.load(id)
+    const records = cell.records.map(record => ({ ...record }))
     this.evict()
-    return records
+    return { records, revision: cell.revision, identity: cell }
   }
+  async read(id) { return (await this.snapshot(id)).records }
   async flush() { await Promise.all(this.writes.values()) }
 }
 
@@ -205,12 +227,12 @@ export function projectTrace(events, telemetry = []) {
         range: data.shadowedRange, nodeCount: data.shadowedSeqs?.length, inputTokens: data.shadowedTokenCount,
         provider: data.provider, model: data.model, usage: data.usage })
       if (!record.original && data.shadowedSeqs) {
-        const original = clipped(data.shadowedSeqs.map(seq => {
-          const source = bySeq.get(seq)?.data
-          return textOf(source?.content ?? source?.message?.content)
-        }).filter(Boolean).join('\n\n'), SOURCE_LIMIT)
-        record.original = original.text
-        record.originalTruncated = original.truncated
+        Object.assign(record, sourceExcerpt((function* () {
+          for (const seq of data.shadowedSeqs) {
+            const source = bySeq.get(seq)?.data
+            yield source?.content ?? source?.message?.content
+          }
+        })()))
       }
     } else if (event.type === 'compaction/end') {
       record.endedAt = event.time
@@ -243,6 +265,7 @@ export class TraceService extends TypertRemoteService {
     super(ctx, 'fasterCompressTrace')
     this.journal = journal
     this.integration = integration
+    this.projections = new Map()
     ctx.typert.register({ package: 'dsh-faster-compress', face: 'host', schemas: [],
       model: { services: [], events: [], objects: [] }, invocations: [contract.traceDescriptor] })
   }
@@ -252,9 +275,21 @@ export class TraceService extends TypertRemoteService {
     // The existing query capability resolves live and archived sessions and validates replay.
     const observation = await this.ctx.sessionQuery.observeSession(sessionId, { signal, projectionMode: 'none' })
     try {
-      const records = await this.journal.read(sessionId)
+      const snapshot = this.journal.snapshot ? await this.journal.snapshot(sessionId) : { records: await this.journal.read(sessionId) }
       signal.throwIfAborted()
-      return { ...projectTrace(observation.events, records), storageWarning: this.journal.warning, integration: this.integration(sessionId), sampledAt: Date.now() }
+      const cache = this.projections ??= new Map()
+      const cached = cache.get(sessionId)
+      // Always observe first: a cache hit never bypasses session resolution.
+      const reusable = observation.header != null && snapshot.identity != null && cached
+        && cached.header === observation.header && cached.cursor === observation.cursor
+        && cached.source === observation.source && cached.revision === observation.revision
+        && cached.journal === snapshot.identity && cached.journalRevision === snapshot.revision
+      const projected = reusable ? cached.projected : projectTrace(observation.events, snapshot.records)
+      cache.delete(sessionId)
+      cache.set(sessionId, { header: observation.header, cursor: observation.cursor, source: observation.source,
+        revision: observation.revision, journal: snapshot.identity, journalRevision: snapshot.revision, projected })
+      while (cache.size > 8) cache.delete(cache.keys().next().value)
+      return { ...projected, storageWarning: this.journal.warning, integration: this.integration(sessionId), sampledAt: Date.now() }
     } finally { observation[Symbol.dispose]() }
   }
 }

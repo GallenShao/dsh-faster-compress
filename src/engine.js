@@ -26,10 +26,10 @@ import z from '@deepseek-ai/schemastery'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import { budgets, policyFor } from './budgets.js'
-import { openTurnOf, selectRange, selectionIntact } from './selection.js'
+import { openTurnOf, selectRange, selectionIntact, selectionSurfaceIntact } from './selection.js'
 import { checkpointMessage, postCommitPrefix, summarizationInput } from './checkpoint.js'
 import { commit } from './transaction.js'
-import { TraceJournal, TraceService, textOf, traceError } from './trace.js'
+import { TraceJournal, TraceService, textOf, sourceExcerpt, traceError } from './trace.js'
 import { ResponseTracker } from './response-trace.js'
 import { inheritReasoning, requestRoute, prefixFingerprint, usageSnapshot } from './request-policy.js'
 
@@ -129,18 +129,32 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
   #fallback = new WeakSet()
   /** Agents seen since load, keyed by session id, to reach a session's owner. */
   #agents = new Map()
-  /** Adapter metadata per routed target; it does not change within a process. */
+  /** Adapter metadata per routed target, invalidated on adapter updates. */
   #capacity = new Map()
+  #capacityEpoch = 0
+  #admission = new WeakMap()
+  #idle = new WeakSet()
+  // Bound summaries retained across idle sessions; no persisted executable state.
+  #parked = new Map()
+  #turns = new WeakMap()
   /** Cancellation for background work, independent of any single turn. */
   #abort = new AbortController()
   /** Loader-owned live settings; reads never remount the compaction service. */
   #eagerConfig
 
+  #eagerSnapshot
   get eager() {
-    return Object.freeze(Object.fromEntries(Object.entries(DEFAULTS).map(([key, fallback]) => {
-      const value = this.#eagerConfig[key]
-      return [key, (isVolatile(value) ? value.get() : value) ?? fallback]
-    })))
+    let next
+    for (const key in DEFAULTS) {
+      const setting = this.#eagerConfig[key]
+      const value = (isVolatile(setting) ? setting.get() : setting) ?? DEFAULTS[key]
+      if (!this.#eagerSnapshot || value !== this.#eagerSnapshot[key]) {
+        next ??= { ...this.#eagerSnapshot }
+        next[key] = value
+      }
+    }
+    if (next) this.#eagerSnapshot = Object.freeze(next)
+    return this.#eagerSnapshot
   }
 
   constructor(ctx, config = {}) {
@@ -161,11 +175,12 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     }
     ctx.effect(() => () => {
       for (const agent of this.#agents.values()) this.#discard(agent.session, 'unloaded')
+      for (const agent of this.#agents.values()) this.#releaseTurn(agent.session)
       this.#abort.abort()
       if (!host) this.responses.dispose()
       return this.trace.flush()
     })
-    ctx.on('llm/adapters-updated', () => this.#capacity.clear())
+    ctx.on('llm/adapters-updated', () => { this.#capacityEpoch += 1; this.#capacity.clear() })
     if (this.config.auto) this.#registerTriggers()
   }
 
@@ -222,6 +237,9 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
 
   async #compactIfNeeded(agent, trigger, signal) {
     signal.throwIfAborted()
+    this.#idle.delete(agent.session)
+    this.#parked.delete(agent.session)
+    this.#bindTurn(agent.session, signal)
     // Overflow recovery is a repair, not a scheduled compaction: it forces a
     // reduction below the normal thresholds and must run inline.
     if (trigger === 'context-overflow') {
@@ -269,7 +287,9 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
       )
       // A large result may have arrived after selection. Count the prepared
       // commit as the first attempt, then use the stock transaction for retries.
-      const policy = policyFor(this.config, session.requestHeader().config)
+      const config = session.requestHeader()?.config
+      if (!config) throw new Error('faster-compress: request header missing after prepared commit')
+      const policy = policyFor(this.config, config)
       let result = committed
       let measurement = this.ctx.tokenMeter.measure(session)
       for (let retry = 0; measurement.totalTokens >= budget.thresholdTokens && retry < policy.compactionRetries; retry += 1) {
@@ -302,16 +322,18 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    */
   #onToolCall(session) {
     const agent = this.#agents.get(session.id)
-    if (agent === undefined) return
+    if (agent === undefined || this.#idle.has(session)) return
     const pending = this.#pending.get(session)
     if (pending !== undefined) {
       this.#validateWarmup(agent, pending)
       if (this.eager.warmup && pending.summary !== undefined && !pending.warmed) void this.#warmup(agent, pending)
       return
     }
+    const admission = this.#admission.get(session)
     void this.#tryStart(agent).catch(error => {
       this.ctx.logger.debug?.(`faster-compress: background preparation failed: ${error instanceof Error ? error.message : String(error)}`)
-      if (!this.#abort.signal.aborted) {
+      if (!this.#abort.signal.aborted && this.#agents.get(session.id) === agent
+        && !this.#idle.has(session) && this.#admission.get(session) === admission) {
         const id = randomUUID()
         this.trace.begin(session.id, { id })
         this.trace.update(session.id, id, { status: 'failed', reason: 'preparation', error: traceError(error) })
@@ -326,19 +348,24 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     ctx.on('agent/disposed', ({ agent }) => {
       this.#discard(agent.session, 'disposed')
       this.#agents.delete(agent.session.id)
+      this.#releaseTurn(agent.session)
     })
-    // A completed turn has no next request to benefit from this preparation.
-    // The next turn re-measures and prepares again if needed.
+    // Normal completion closes admission, not the reusable selected prefix.
     ctx.on('agent/status', ({ agent, status }) => {
       if (status === 'idle') {
-        this.#discard(agent.session, 'idle')
+        this.#park(agent.session)
         this.#fallback.delete(agent.session)
       }
     })
     ctx.on('session/event', (session, event) => {
+      if (event.type === 'turn/start') this.#idle.delete(session)
+      if (event.type === 'turn/end') {
+        if (event.data.reason?.kind === 'aborted' || event.data.reason?.kind === 'error') this.#discard(session, 'cancelled')
+        this.#park(session)
+      }
       const pending = this.#pending.get(session)
       if (pending && event.surfaceOp?.op === 'replace'
-        && !selectionIntact(session, pending.selection, this.ctx.tokenMeter.measure(session))) {
+        && !selectionSurfaceIntact(session, pending.selection)) {
         this.#discard(session, 'stale')
         this.#fallback.add(session)
       }
@@ -353,8 +380,11 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {Promise<import('./budget.js').Budget | null>} Budgets, or `null` when the route is unresolved.
    */
   async #tryStart(agent) {
+    const session = agent.session
+    const admission = this.#admission.get(session)
     const budget = await this.#budget(agent)
-    if (budget === null) return
+    if (budget === null || this.#agents.get(session.id) !== agent || this.#idle.has(session)
+      || this.#admission.get(session) !== admission) return
     const total = this.ctx.tokenMeter.measure(agent.session).totalTokens
     if (budget.thresholdTokens > 0 && total >= budget.eagerTokens && total < budget.waitTokens && !this.#fallback.has(agent.session)) this.#start(agent, budget)
   }
@@ -366,14 +396,25 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {Promise<import('./budget.js').Budget | null>} Budgets, or `null` when capacity is unknown.
    */
   async #budget(agent, signal = this.#abort.signal) {
-    const config = agent.session.requestHeader()?.config
-    if (config === undefined || config.provider.length === 0 || config.model.length === 0) return null
-    const target = { provider: config.provider, model: config.model }
-    const key = `${target.provider}/${target.model}`
-    let info = this.#capacity.get(key)
-    if (info === undefined) {
-      info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
-      this.#capacity.set(key, info)
+    let config, target, info
+    for (;;) {
+      signal.throwIfAborted()
+      config = agent.session.requestHeader()?.config
+      if (config === undefined || config.provider.length === 0 || config.model.length === 0) return null
+      target = { provider: config.provider, model: config.model }
+      const key = JSON.stringify([target.provider, target.model])
+      const epoch = this.#capacityEpoch
+      info = this.#capacity.get(key)
+      if (info === undefined) {
+        info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+        signal.throwIfAborted()
+        if (epoch !== this.#capacityEpoch) continue
+        this.#capacity.set(key, info)
+      }
+      const current = agent.session.requestHeader()?.config
+      if (current?.provider !== target.provider || current?.model !== target.model) continue
+      config = current
+      break
     }
     if (info.context?.contextWindow === undefined) return null
     const policy = policyFor({ ...this.config, ...this.eager }, target)
@@ -411,13 +452,13 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    */
   #start(agent, budget, turnSignal) {
     const session = agent.session
-    if (this.#abort.signal.aborted || turnSignal?.aborted || this.#pending.has(session) || this.#work.inFlight >= this.eager.maxConcurrent) return
+    if (this.#abort.signal.aborted || turnSignal?.aborted || this.#idle.has(session) || this.#pending.has(session) || this.#work.inFlight >= this.eager.maxConcurrent) return
 
     const selection = selectRange(session, this.ctx.tokenMeter.measure(session), budget.retainTokens)
     if (selection === null) return
 
     const abort = new AbortController()
-    const signal = AbortSignal.any([this.#abort.signal, abort.signal, ...(turnSignal === undefined ? [] : [turnSignal])])
+    const signal = AbortSignal.any([this.#abort.signal, abort.signal])
     const input = summarizationInput(session, selection.seqs)
     const prepared = {
       abort,
@@ -438,7 +479,9 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
       thresholdTokens: budget.thresholdTokens, eagerTokens: budget.eagerTokens, waitTokens: budget.waitTokens,
       contextWindow: budget.contextWindow, reservedCompletion: budget.reservedCompletion, inputLimit: budget.inputLimit,
       provider: target?.provider, model: target?.model,
-      original: selection.seqs.map(seq => textOf(session.deriveEventMessage(session.eventAt(seq))?.content)).filter(Boolean).join('\n\n'),
+      ...sourceExcerpt((function* () {
+        for (const seq of selection.seqs) yield session.deriveEventMessage(session.eventAt(seq))?.content
+      })()),
     })
     this.#work.inFlight += 1
     prepared.settled = (async () => {
@@ -456,6 +499,7 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
       } catch (error) {
         if (this.#pending.get(session) === prepared) {
           this.#pending.delete(session)
+          this.#parked.delete(session)
           if (!signal.aborted) this.#fallback.add(session)
           this.trace.update(session.id, prepared.compactionId, { status: signal.aborted ? 'discarded' : 'failed',
             reason: signal.aborted ? 'cancelled' : 'summary', generationMs: performance.now() - prepared.startedAt,
@@ -620,6 +664,34 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     this.trace.update(agent.session.id, pending.compactionId, { warmup: { ...warmup } })
   }
 
+  #releaseTurn(session) {
+    this.#turns.get(session)?.()
+    this.#turns.delete(session)
+  }
+
+  #bindTurn(session, signal) {
+    this.#releaseTurn(session)
+    const cancel = () => {
+      this.#discard(session, 'cancelled')
+      this.#idle.add(session)
+    }
+    signal.addEventListener('abort', cancel, { once: true })
+    this.#turns.set(session, () => signal.removeEventListener('abort', cancel))
+  }
+
+  #park(session) {
+    this.#admission.set(session, (this.#admission.get(session) ?? 0) + 1)
+    this.#idle.add(session)
+    this.#releaseTurn(session)
+    const pending = this.#pending.get(session)
+    if (!pending) return
+    // An optional warm-up is tied to the current tail, unlike the summary.
+    pending.warmupAbort?.abort()
+    this.#parked.delete(session)
+    this.#parked.set(session, pending)
+    while (this.#parked.size > 24) this.#discard(this.#parked.keys().next().value, 'retention-limit')
+  }
+
   /**
    * Drop a prepared summary.
    *
@@ -627,6 +699,8 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {void}
    */
   #discard(session, reason = 'cancelled') {
+    this.#admission.set(session, (this.#admission.get(session) ?? 0) + 1)
+    this.#parked.delete(session)
     const pending = this.#pending.get(session)
     this.#pending.delete(session)
     if (pending && reason !== 'committing') this.trace.update(session.id, pending.compactionId, {

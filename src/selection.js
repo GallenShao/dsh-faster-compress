@@ -97,16 +97,15 @@ export function selectRange(session, measurement, retainTokens) {
 /**
  * Whether a previously selected span is still a valid replacement target.
  *
- * Nodes appended outside the span do not invalidate a summary; a rewrite or a
- * repricing inside it does, because the logged shadow price would then no
- * longer describe what the replacement removes.
+ * Nodes appended outside the span do not invalidate a summary. This cheap
+ * check validates node identity and tool boundaries; selectionIntact additionally
+ * validates prices immediately before committing.
  *
  * @param {import('@deepseek-ai/dsh-session').Session} session Session to inspect.
  * @param {Selection} selection The span as selected when the summary was built.
- * @param {{ nodes: readonly MeterNode[] }} measurement Fresh meter reading.
  * @returns {boolean} Whether the summary may still replace the span.
  */
-export function selectionIntact(session, selection, measurement) {
+export function selectionSurfaceIntact(session, selection) {
   const surface = session.surface.nodes
   const startIdx = surface.indexOf(selection.start)
   const endIdx = surface.indexOf(selection.end)
@@ -118,6 +117,15 @@ export function selectionIntact(session, selection, measurement) {
   if (!toolPairingBalancedBefore(session, selection.start)) return false
   if (!toolPairingBalancedAfter(session, selection.end)) return false
 
+  return true
+}
+
+/** Full commit-time validation includes the current route's prices. */
+export function selectionIntact(session, selection, measurement) {
+  if (!selectionSurfaceIntact(session, selection)) return false
+  const surface = session.surface.nodes
+  const startIdx = surface.indexOf(selection.start)
+  const endIdx = surface.indexOf(selection.end)
   const priced = measurement.nodes
   if (priced.length !== surface.length) return false
   let routeTokens = 0
