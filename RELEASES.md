@@ -6,6 +6,18 @@
 
 发布必须能追溯到确定的 Git 提交、annotated tag 和 npm tarball 校验值。按 [AGENTS.md](AGENTS.md) 执行完整流程；未发布内容写入 `CHANGELOG.md` 的 `未发布`。既有标签保持不变，发布后补充记录使用单独的文档提交。
 
+## 0.2.2 · 2026-10-18
+
+- 审批：项目所有者试用修复后，明确批准发布 `0.2.2`、提交与推送，并要求更新日志全部改为简洁中文。
+- Git 提交：[`b4a4b15a478f3af6d92d57507366f940404ae1c8`](https://github.com/GallenShao/dsh-faster-compress/commit/b4a4b15a478f3af6d92d57507366f940404ae1c8)
+- Git 标签：[`v0.2.2`](https://github.com/GallenShao/dsh-faster-compress/tree/v0.2.2)，annotated tag；已核对远程指向，不移动标签。
+- npm：[`dsh-faster-compress@0.2.2`](https://www.npmjs.com/package/dsh-faster-compress/v/0.2.2)，`latest` 已更新为 `0.2.2`。发布经 HTTP 202 异步处理后公开，线上 SHA-1、integrity 和下载包完整字节均与发布物一致；未重复发布或变更已有标签。
+- tarball SHA-1：`22b9efb71267c6f5426cc87fb935ee7ff38615c9`
+- tarball integrity：`sha512-HYU/pioDc98I07LJYe1SnPCC/yO5JZf4xny7xFZcrzLZHxfLTozIKyugj4SsvXGRZNqF/646geBRsmLtuIDfBA==`
+- 变更：跨回合复用摘要，修复生命周期与容量缓存竞态，优化历史读取和摘录，统一中文更新日志。
+- 验证：137 项回归、构建、语法和差异检查通过；独立 review 通过，项目所有者已试用确认。27 个发布文件与版本提交逐字节一致，中英文 README 图片已核对线上内容。
+- 开源审查：发布包无本机排障资料、真实会话、私有部署路径或匹配凭据模式；新提交和标签均使用项目所有者署名。
+
 ## 0.2.1 · 2026-10-17
 
 - 审批：项目所有者明确批准按实测用量方案修改、发布 `0.2.1`，并通过 npm 为其 DSH 升级。
