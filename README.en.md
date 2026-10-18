@@ -12,8 +12,6 @@
 
 Long conversations in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) need context compaction. The stock backend writes a summary before the next step can begin. **Faster Compress starts that work earlier, in the background**: start at the preparation threshold, let the task continue within safe headroom, and apply a ready summary before the next model request. Separate warm-up is off by default.
 
-> **0.2.2** retains prepared summaries across normal turn completion, revalidates them when the conversation resumes, and fixes background-task and capacity-cache races. Upgrades preserve saved settings; recommended preparation is **100%**, with warm-up **Off**.
-
 ## Install with one package name
 
 Open **Plugins → Add plugin** from the DSH sidebar and enter:
@@ -75,8 +73,6 @@ Diagnostics live separately in `$DSH_HOME/data/faster-compress/traces/` (default
 
 Hiding the history tab keeps diagnostic collection enabled. To remove these local copies, stop DSH and delete that directory. Committed summaries in native session logs remain managed by DSH.
 
-**History reports `strict definition was withdrawn`?** An earlier development build incorrectly unmounted the history service during registration. Version 0.2.0 fixes it. After updating, restart DSH when active work finishes and refresh the page. Keep history files and strict RPC validation intact.
-
 **What if an update loses the prepared summary?** Preparation is held in memory. Diagnostic files never reapply old summaries after restart. Missing results are prepared again within the safe budget; at the safety limit, they fall back to stock synchronous compaction. Failed summaries and stale selections fall back at the preparation threshold, as does reload cancellation of preparation during a live turn. Explicitly cancelled turns stay cancelled. Integration replaces the native backend inside its preset. Failed installation rolls back to native; disable/unload restores native. Hot loading leaves existing agents untouched: restart DSH after active work finishes.
 
 ## Configure it in Settings
@@ -90,8 +86,8 @@ Open **Plugins → Installed → Faster Compress** from the sidebar. Its setting
 | Show Compaction History tab | **On** | Saving immediately shows or hides the conversation tab; diagnostics remain recorded |
 | More options → Concurrent background summaries | **1** | Increase for multiple sessions only when the model provider has spare capacity |
 | More options → Warm-up output limit | **1 token** | Usually leave unchanged; accepts 1–8 |
-| Output reservation floor | **0 (automatic)** | Set the actual output cap if metadata omits it, e.g. 32768 for Qwen; otherwise native compaction is used |
-| Input safety margin | **4096 tokens** | Estimation margin before the input limit |
+| More options → Output reservation floor | **0 (automatic)** | Set the actual output cap if metadata omits it, e.g. 32768 tokens; otherwise native compaction is used |
+| More options → Input safety margin | **4096 tokens** | Estimation margin before the input limit |
 
 Restoring defaults is staged until you save. Lowering concurrency does not interrupt requests already running. Upgrades preserve explicitly saved settings. To adopt the new defaults, set preparation to **100%** and warm-up to **Off**, or restore defaults and save.
 
@@ -101,8 +97,8 @@ Best suited to long coding sessions, frequent tool use, and tasks that regularly
 
 - **Less waiting, not a zero-wait guarantee.** An unfinished summary still blocks at the safety limit. Stopping the turn immediately interrupts that wait. New summaries and appended tail messages still need prefill, normally performed by the next real request, so first output can still take time.
 - **Warm-up is not free acceleration.** Output is usually just one token, but a long prompt can require substantial prefill and compete with the main request. Benefits depend on prefix identity and provider cache retention. `maxConcurrent` only limits background summaries; it does not prevent overlap with main requests. Disable warm-up if it does not help.
-- **Some preparation is discarded.** A turn may end, the selected span may change, or the summary may fail to shrink it.
-- **Matching prefixes do not guarantee cache hits.** Hybrid Qwen models also need a retained recurrent checkpoint. Removing competing pruning cannot guarantee a restorable state at the summary cutoff; deployment-side verification remains necessary.
+- **Some preparation is discarded.** Cancellation, changes to the selected span, or a summary that fails to shrink it can invalidate preparation. Normal turn completion preserves it for reuse when the conversation resumes.
+- **Matching prefixes do not guarantee cache hits.** Hybrid models with recurrent state also need a retained checkpoint. Removing competing pruning cannot guarantee a restorable state at the summary cutoff; deployment-side verification remains necessary.
 - **No real-endpoint performance benchmark yet.** The diagram describes the flow, not a measured speedup.
 
 <details>
@@ -142,8 +138,4 @@ Regression tests cover budgets and selection, cancellation, pressure retries, wa
 
 Compaction History regressions cover persistence and recovery, session isolation, retention limits, unavailable storage, application-state projection, and RPC lifecycles. See [test instructions](https://github.com/GallenShao/dsh-faster-compress/blob/main/tests/README.md) for isolated browser checks that leave the everyday DSH profile untouched.
 
-## Release maintenance
-
-Every version change and release requires explicit approval from the project owner. Complete implementation, documentation, and testing first, then submit the proposed version, change summary, and validation results for review. Only after approval may the version be changed, the release tag created, and the package published. Each npm version maps to a specific Git commit and a `v<version>` tag. See the repository's [release records and approval policy](https://github.com/GallenShao/dsh-faster-compress/blob/main/RELEASES.md).
-
-[Changelog](CHANGELOG.md) · [Source](https://github.com/GallenShao/dsh-faster-compress) · [MIT License](LICENSE)
+[Changelog](CHANGELOG.md) · [Release records](https://github.com/GallenShao/dsh-faster-compress/blob/main/RELEASES.md) · [Source](https://github.com/GallenShao/dsh-faster-compress) · [MIT License](LICENSE)

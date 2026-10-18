@@ -13,9 +13,13 @@ git diff --check
 
 Model calls are stubbed. Session commits, event replay, config schemas, and RPC descriptors use installed DSH packages. Tests do not access everyday conversations or invoke paid models.
 
-新增策略回归使用真实 DSH `agent/pre-step` 回调、Session 和原生回退：验证默认在准备阈值启动、完成回调不改上下文、就绪即在下一安全边界提交、保留新增尾部、默认无预热、可选预热不延迟应用、输出预留变化后的等待线、并发占满和失败回退。历史自定义提前比例与开启预热的配置仍单独覆盖。
+调度回归使用真实 DSH `agent/pre-step` 回调、Session 和原生回退：验证默认在准备阈值启动、完成回调不改上下文、就绪即在下一安全边界提交、保留新增尾部、默认无预热、可选预热不延迟应用、输出预留变化后的等待线、并发占满和失败回退。历史自定义提前比例与开启预热的配置仍单独覆盖。
 
 Scheduling regressions exercise the real stock pre-step hook, Session, and fallback: budget-aware preparation launch, no callback-time mutation, ready application at the next boundary, tail preservation, no default warm-up, nonblocking optional warm-up, changed output reservations, concurrency saturation, and failure fallback. Existing custom preparation ratios and opt-in warming remain covered separately.
+
+生命周期回归覆盖正常回合结束后的摘要保留与复用、取消和销毁、迟到的异步查询、模型容量缓存失效，以及空闲会话的保留上限。
+
+Lifecycle regressions cover preparation retention and reuse across normal turn completion, cancellation and disposal, late asynchronous lookups, model-capacity cache invalidation, and idle-session retention limits.
 
 ## 隔离浏览器联调 / Isolated browser check
 
@@ -60,7 +64,7 @@ Stop the test host and remove its fixture patch or temporary profile when done.
 
 Preset integration regressions load the installed standard/ptc/cordis compaction groups through the real Cordis Loader and Preset Registry, dispatch AgentRegistry creation and scoped pre-step events, verify command resolution, and check rollback, unload restoration, minimal/custom/disabled policies and hot-load deferral. The surrounding Agent loop/model and command transport are test fixtures, not a live inference benchmark.
 
-接入回归加载实际安装的 Web preset 压缩组，使用真实 Loader、Preset Registry、AgentRegistry 创建事件和作用域步骤事件；验证手动命令解析、回滚、卸载恢复及 minimal/自定义/禁用策略。外围模型循环与命令传输为测试桩，没有对日常服务发送推理请求。
+接入回归加载实际安装的 Web preset 压缩组，使用真实 Loader、Preset Registry、AgentRegistry 创建事件和作用域步骤事件；验证手动命令解析、回滚、卸载恢复及 minimal/自定义/禁用策略。外围模型循环与命令传输为测试桩，不调用模型服务。
 
 用量回归覆盖缓存读取与写入计数、原生历史恢复、替换前最近一次和替换后首次主请求、缺失 usage、检查点被替换及经核验的实时 usage；摘要输出不混入上下文输入，估算不补齐实测。
 
