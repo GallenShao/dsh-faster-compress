@@ -1,6 +1,6 @@
 {
   "name": "dsh-faster-compress",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Prepare DeepSeek Harness context summaries in the background to reduce compaction pauses.",
   "author": "gallenshao <shaojialun@pku.edu.cn>",
   "keywords": [
@@ -60,7 +60,8 @@
     },
     "compatibility": {
       "dshReleases": {
-        "0.2.0-rc.2": "compatible"
+        "0.2.0-rc.2": "compatible",
+        "0.2.1-rc.2": "compatible"
       }
     },
     "client": {
@@ -90,7 +91,8 @@
     "@deepseek-ai/cosmokit": "~1.8.5",
     "@deepseek-ai/dsh-home-paths": ">=0.2.0-rc.2 <0.3.0",
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.0-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.0-rc.2 <0.3.0"
+    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.0-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2 <0.3.0"
   },
   "publishConfig": {
     "access": "public",

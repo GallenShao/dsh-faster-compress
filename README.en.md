@@ -5,10 +5,10 @@
 [中文](README.md) · English
 
 ![Node.js 22.19+](https://img.shields.io/badge/Node.js-%E2%89%A522.19-356D50?style=flat-square)
-![DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.0--rc.2-0A7A78?style=flat-square)
+![DSH 0.2.1-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.1--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.2/assets/overview-en.svg)
+![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.3/assets/overview-en.svg)
 
 **Background context compaction** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Reduce pauses for summaries during long tasks, and inspect results, timings, and token usage in Compaction History.
 
@@ -22,7 +22,7 @@ dsh-faster-compress
 
 Install, then restart DSH. **The defaults are ready to use. No new API key or YAML editing.**
 
-Verified with **DSH 0.2.0-rc.2**; requires **Node.js ≥ 22.19**. It uses the conversation's model and existing credentials. Summary and warm-up requests remain subject to your provider's billing.
+Verified with **DSH 0.2.0-rc.2 / 0.2.1-rc.2**; requires **Node.js ≥ 22.19**. It uses the conversation's model and existing credentials. Summary and warm-up requests remain subject to your provider's billing.
 
 <details>
 <summary>Using the command line?</summary>

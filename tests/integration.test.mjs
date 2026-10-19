@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { Context } from '@deepseek-ai/cordis'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
-import Presets, { serviceForAgent, standingMountFor } from '@deepseek-ai/dsh-agent-preset-registry'
+import Presets from '@deepseek-ai/dsh-agent-preset-registry'
+import { serviceForAgent, mountForAgent } from '../src/preset-compat.js'
 import Host, { FasterCompactionEngine } from '../src/index.js'
 import { TraceJournal } from '../src/trace.js'
 import { Session } from '@deepseek-ai/dsh-session'
@@ -26,6 +27,11 @@ async function fixture(t, { backend = BasicCompactionEngine, config = {}, hostCo
   await ctx.plugin(Loader)
   Object.assign(ctx.loader.builtins, { group: Group, stock: backend })
   await ctx.plugin(Projections)
+  let remoteAccessModule
+  try { remoteAccessModule = runtime.resolve('@deepseek-ai/dsh-api-remote-access') } catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') throw error
+  }
+  if (remoteAccessModule) await ctx.plugin((await import(remoteAccessModule)).default)
   for (const name of ['dsh-llm', 'dsh-session', 'dsh-token-meter', 'dsh-agent', 'dsh-typert-registry', 'dsh-api-gateway']) {
     const { default: Plugin } = await import(runtime.resolve('@deepseek-ai/' + name))
     await ctx.plugin(Plugin)
@@ -56,7 +62,8 @@ async function fixture(t, { backend = BasicCompactionEngine, config = {}, hostCo
     return value
   }
   const step = agent => ctx.waterfall(scopeTarget(agent, scopeOf(agent.ctx)), 'agent/pre-step', { agent, signal: new AbortController().signal }, () => 'continued')
-  return { ctx, host, hostFiber, agent, step, commands, engine: a => serviceForAgent(ctx, a, 'compaction') }
+  const peer = { id: 'test-owner', ctx, principal: { kind: 'owner' }, signal: new AbortController().signal, interactions: 'none' }
+  return { ctx, host, hostFiber, agent, step, commands, peer, engine: a => serviceForAgent(ctx, a, 'compaction') }
 }
 
 test('one preset backend handles scoped steps; host disposal restores native configuration', async t => {
@@ -75,7 +82,7 @@ test('one preset backend handles scoped steps; host disposal restores native con
   assert.equal(await f.step(a), 'continued')
   assert.equal(await f.step(b), 'continued')
   assert.equal(calls, 2, 'one automatic handler per step')
-  const tree = standingMountFor(a.ctx).tree
+  const tree = mountForAgent(f.ctx, a).tree
   assert.equal(tree.resolve('backend').disabled, true)
   await f.hostFiber.dispose()
   assert.equal(f.engine(a).constructor, BasicCompactionEngine)
@@ -106,6 +113,70 @@ test('background preparation does not invoke native pruning; overflow cancels it
   assert.equal(summarySignal.aborted, true)
 })
 
+test('agents joining during backend replacement share the same installation', async t => {
+  const f = await fixture(t)
+  const a = await f.agent(), b = await f.agent()
+  const tree = mountForAgent(f.ctx, a).tree
+  const create = tree.create.bind(tree)
+  const entered = Promise.withResolvers(), resume = Promise.withResolvers()
+  let replacements = 0
+  tree.create = async (...args) => {
+    replacements++
+    entered.resolve()
+    await resume.promise
+    return create(...args)
+  }
+  const first = f.host.bind(a)
+  await entered.promise
+  let second
+  try {
+    assert.equal(f.engine(a), undefined, 'native is disabled during the gap')
+    second = f.host.bind(b)
+    assert.equal(f.host.mounts.size, 1)
+  } finally { resume.resolve() }
+  await Promise.all([first, second])
+  assert.equal(replacements, 1)
+  assert.ok(f.engine(a) instanceof FasterCompactionEngine)
+  assert.equal(f.engine(b), f.engine(a))
+  assert.equal(f.host.integration.get(b.session.id).status, 'active')
+})
+
+test('preset service lookup and restoration stay inside their own host', async t => {
+  const left = await fixture(t), right = await fixture(t)
+  const a = await left.agent(), b = await right.agent()
+  const leftNative = left.engine(a), rightNative = right.engine(b)
+  assert.notEqual(leftNative, rightNative)
+  await left.host.bind(a)
+  assert.equal(right.engine(b), rightNative)
+  await right.host.bind(b)
+  const rightEngine = right.engine(b)
+  assert.ok(rightEngine instanceof FasterCompactionEngine)
+  assert.notEqual(left.engine(a), rightEngine)
+  await left.hostFiber.dispose()
+  assert.equal(left.engine(a).constructor, BasicCompactionEngine)
+  assert.equal(right.engine(b), rightEngine)
+})
+
+test('a preset without a compaction backend remains unchanged', async t => {
+  const f = await fixture(t, { plugins: [] })
+  const a = await f.agent()
+  await f.host.bind(a)
+  assert.equal(f.engine(a), undefined)
+  assert.equal(f.host.integration.get(a.session.id).status, 'native')
+})
+
+test('a third-party service without a Loader context is left intact', async t => {
+  const custom = { compactIfNeeded: async () => null }
+  class CustomBackend {
+    constructor(ctx) { ctx.reflect.provide('compaction', custom) }
+  }
+  const f = await fixture(t, { backend: CustomBackend })
+  const a = await f.agent()
+  await f.host.bind(a)
+  assert.equal(f.engine(a), custom)
+  assert.equal(f.host.integration.get(a.session.id).status, 'native')
+})
+
 for (const variant of ['third-party', 'auto-disabled']) test(`preserves ${variant} preset policy`, async t => {
   class Custom extends BasicCompactionEngine {}
   const f = await fixture(t, variant === 'third-party' ? { backend: Custom } : { config: { auto: false } })
@@ -117,7 +188,7 @@ for (const variant of ['third-party', 'auto-disabled']) test(`preserves ${varian
 
 test('failed replacement restores native backend instead of leaving an empty realm', async t => {
   const f = await fixture(t)
-  const a = await f.agent(), tree = standingMountFor(a.ctx).tree
+  const a = await f.agent(), tree = mountForAgent(f.ctx, a).tree
   const create = tree.create.bind(tree)
   tree.create = async () => { throw new Error('injected loader failure') }
   await f.host.bind(a)
@@ -139,7 +210,7 @@ for (const preset of ['standard', 'ptc', 'cordis', 'minimal']) test(`installed $
   const f = await fixture(t, { plugins })
   const a = await f.agent()
   await f.ctx.agents.register(a)
-  if (preset === 'minimal') {
+  if (!plugins.length) {
     assert.equal(f.engine(a), undefined)
     assert.equal(f.commands.has('compact'), false)
     return
@@ -147,8 +218,11 @@ for (const preset of ['standard', 'ptc', 'cordis', 'minimal']) test(`installed $
   const engine = f.engine(a)
   assert.ok(engine instanceof FasterCompactionEngine)
   const pruner = serviceForAgent(f.ctx, a, 'toolResultPruner')
-  assert.ok(pruner)
-  assert.equal(pruner.config.thresholdChars, 8192)
+  const hasPruner = plugins.some(group => group.config.some(row => row.id === 'tool-result-pruner'))
+  if (hasPruner) {
+    assert.ok(pruner)
+    assert.equal(pruner.config.thresholdChars, 8192)
+  } else assert.equal(pruner, undefined)
   let manual = 0, automatic = 0
   engine.compactNow = async agent => { assert.equal(agent, a); manual++; return null }
   engine.compactIfNeeded = async () => { automatic++; return null }
@@ -196,7 +270,7 @@ test('different preset revisions share one background admission limit', async t 
 test('real pruner preserves the original log and runs only on fallback after cancellation', async t => {
   const f = await fixture(t)
   const a = await f.agent()
-  const tree = standingMountFor(a.ctx).tree
+  const tree = mountForAgent(f.ctx, a).tree
   await tree.create({ id: 'pruner', name: pathToFileURL(runtime.resolve('@deepseek-ai/dsh-compaction-tool-result-pruner')).href }, 'compaction')
   await tree.await()
   await f.ctx.agents.register(a)
@@ -232,7 +306,7 @@ test('history strict RPC survives preset replacement and first session read', as
   const a = await f.agent()
   await f.ctx.agents.register(a)
   assert.ok(f.ctx.typert.local.get(endpoint), 'still registered after backend replacement')
-  const result = await f.ctx.typertGateway.invoke({ namespace: 'fasterCompressTrace', method: 'read', args: { sessionId: a.session.id }, signal: new AbortController().signal })
+  const result = await f.ctx.typertGateway.invoke({ namespace: 'fasterCompressTrace', method: 'read', args: { sessionId: a.session.id }, signal: new AbortController().signal, peer: f.peer })
   assert.equal(result.integration.status, 'active')
   assert.ok(f.ctx.typert.local.get(endpoint), 'still registered after read')
 })
@@ -241,7 +315,7 @@ test('history strict RPC survives preset replacement and first session read', as
 test('history strict RPC is withdrawn on host unload and restored on reload', async t => {
   const f = await fixture(t)
   await new Promise(resolve => setImmediate(resolve))
-  const request = { namespace: 'fasterCompressTrace', method: 'read', args: { sessionId: 'isolated-rpc' }, signal: new AbortController().signal }
+  const request = { namespace: 'fasterCompressTrace', method: 'read', args: { sessionId: 'isolated-rpc' }, signal: new AbortController().signal, peer: f.peer }
   assert.ok(await f.ctx.typertGateway.invoke(request))
   await f.hostFiber.dispose()
   await assert.rejects(f.ctx.typertGateway.invoke(request), /strict definition was withdrawn/)

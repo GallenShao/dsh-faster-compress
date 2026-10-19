@@ -23,7 +23,7 @@ Lifecycle regressions cover preparation retention and reuse across normal turn c
 
 ## 隔离浏览器联调 / Isolated browser check
 
-1. 创建独立临时目录作为 `DSH_HOME`，用 DSH CLI 在其中初始化 Web profile，并安装或链接当前源码包。不要指向日常 `~/.dsh`。验证所用 DSH 为 `0.2.0-rc.2`。
+1. 创建独立临时目录作为 `DSH_HOME`，用 DSH CLI 在其中初始化 Web profile，并安装或链接当前源码包。不要指向日常 `~/.dsh`。兼容回归覆盖 DSH `0.2.0-rc.2` 和 `0.2.1-rc.2`。
 2. 在这个临时 profile 的 `cordis.patch.yml` 追加下面的测试插件，将路径换成当前 checkout 的绝对路径。
 3. 使用 `DSH_HOME=<临时目录> DSH_TRACE_FIXTURE=1 dsh web --port 3098` 启动，通过启动时提供的认证 URL 打开浏览器。不需要配置模型。
 4. 展开“未分组”，打开标题带“联调样例（测试数据）”的会话，选择“压缩历史”。

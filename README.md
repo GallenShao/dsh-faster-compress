@@ -5,10 +5,10 @@
 中文 · [English](README.en.md)
 
 ![Node.js 22.19+](https://img.shields.io/badge/Node.js-%E2%89%A522.19-356D50?style=flat-square)
-![DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.0--rc.2-0A7A78?style=flat-square)
+![DSH 0.2.1-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.1--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![原版需要停下来等摘要；Faster Compress 提前在后台生成摘要，到 step 边界再提交。](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.2/assets/overview-zh.svg)
+![原版需要停下来等摘要；Faster Compress 提前在后台生成摘要，到 step 边界再提交。](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.3/assets/overview-zh.svg)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供**后台上下文压缩**，减少长任务中停下来等摘要的时间，并通过压缩历史查看结果、耗时和用量。
 
@@ -22,7 +22,7 @@ dsh-faster-compress
 
 点击安装，完成后重新启动 DSH。**默认即用，无需 API Key，也不用编辑 YAML。**
 
-已验证 **DSH 0.2.0-rc.2**，需要 **Node.js ≥ 22.19**。它沿用当前对话的模型和已有凭据；摘要、预热请求仍按模型服务的规则计费。
+已验证 **DSH 0.2.0-rc.2 / 0.2.1-rc.2**，需要 **Node.js ≥ 22.19**。它沿用当前对话的模型和已有凭据；摘要、预热请求仍按模型服务的规则计费。
 
 <details>
 <summary>只用命令行？</summary>

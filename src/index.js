@@ -1,6 +1,6 @@
 import { Service } from '@deepseek-ai/cordis'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
-import { standingMountFor, serviceForAgent } from '@deepseek-ai/dsh-agent-preset-registry'
+import { mountForAgent, presetKeyForAgent, serviceForAgent } from './preset-compat.js'
 import { FasterCompactionEngine, DEFAULTS } from './engine.js'
 import { TraceJournal, TraceService, traceError } from './trace.js'
 import { ResponseTracker } from './response-trace.js'
@@ -48,14 +48,17 @@ export default class FasterCompressHost extends Service {
   async bind(agent) {
     if (this.stopped) return
     const id = agent.session.id
-    const mount = standingMountFor(agent.ctx)
-    if (!mount) { this.integration.set(id, { status: 'native', reason: 'no-preset' }); return }
-    let job = this.mounts.get(mount.fiber)
+    const key = presetKeyForAgent(this.ctx, agent)
+    if (!key) { this.integration.set(id, { status: 'native', reason: 'no-preset' }); return }
+    let job = this.mounts.get(key)
     if (!job) {
-      job = { mount, agents: new Set(), task: null }
-      this.mounts.set(mount.fiber, job)
+      const mount = mountForAgent(this.ctx, agent)
+      if (!mount) { this.integration.set(id, { status: 'native', reason: 'not-stock' }); return }
+      job = { mount, key, agents: new Set(), task: null }
+      this.mounts.set(key, job)
       job.task = this.install(job, agent)
     }
+    const { mount } = job
     job.agents.add(agent)
     this.bindings.set(id, job)
     try {
@@ -83,7 +86,7 @@ export default class FasterCompressHost extends Service {
     if (entries.length !== 1 || native.config.auto === false) return null
     const [entry] = entries
     // Hot installation must not rewrite a revision already serving a turn.
-    if ([...this.preexisting].some(other => standingMountFor(other.ctx)?.fiber === mount.fiber)) {
+    if ([...this.preexisting].some(other => presetKeyForAgent(this.ctx, other) === job.key)) {
       throw new Error('Preset already has live agents; restart DSH to activate safely')
     }
     const overrides = Object.fromEntries(Object.entries(this.config)
