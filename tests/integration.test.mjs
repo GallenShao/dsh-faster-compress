@@ -325,3 +325,61 @@ test('history strict RPC is withdrawn on host unload and restored on reload', as
   assert.ok(await f.ctx.typertGateway.invoke(request))
   await assert.rejects(f.ctx.typertGateway.invoke({ ...request, args: { sessionId: '' } }), error => error.code === 'gateway/input-invalid')
 })
+
+for (const order of ['before-backend', 'after-backend']) {
+  test(`DS Bot wrapper isolates owned sessions on a shared preset (${order})`, async t => {
+    const f = await fixture(t)
+    const bot = await f.agent(), ordinary = await f.agent()
+    const owned = new Set([bot.session.id])
+    const adopted = new Map()
+    const marker = Symbol.for('ds-bot/compaction')
+    // Released DS Bot 0.2.1 adopts the preset backend in a prepended pre-step
+    // handler and returns null only for its own sessions. Exercise real scoped
+    // Cordis dispatch, including both listener registration orders.
+    const installBot = () => f.ctx.on('agent/pre-step', ({ agent }, next) => {
+      const engine = f.engine(agent)
+      if (!engine[marker]) {
+        const original = engine[marker] = { compactIfNeeded: engine.compactIfNeeded }
+        adopted.set(engine, original)
+        engine.compactIfNeeded = function (target, trigger, signal) {
+          if (owned.has(target.session.id)) return Promise.resolve(null)
+          return original.compactIfNeeded.call(this, target, trigger, signal)
+        }
+      }
+      return next()
+    }, { prepend: true })
+    let stopBot
+    if (order === 'before-backend') stopBot = installBot()
+    await f.ctx.agents.register(bot)
+    await f.ctx.agents.register(ordinary)
+    if (order === 'after-backend') stopBot = installBot()
+    const engine = f.engine(bot)
+    assert.equal(f.engine(ordinary), engine)
+    engine.ctx.llm.resolveModelInfo = async () => ({ context: { contextWindow: 1000 } })
+    engine.ctx.tokenMeter.measure = session => ({ totalTokens: 800, nodes: session.surface.nodes.map(seq => ({ seq, tokens: 100, heuristicTokens: 100 })) })
+    const requests = []
+    engine.summarize = async (_input, owner, signal) => {
+      requests.push(owner.session.id)
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+    }
+    assert.equal(await f.step(bot), 'continued')
+    assert.deepEqual(requests, [])
+    assert.equal(await f.step(ordinary), 'continued')
+    assert.deepEqual(requests, [ordinary.session.id])
+    // Taking ownership later cancels preparation, even though the shared engine
+    // was already adopted and the other session previously passed its wrapper.
+    owned.add(ordinary.session.id)
+    await f.step(ordinary)
+    const record = f.host.trace.cell(ordinary.session.id).records[0]
+    assert.equal(record.status, 'discarded')
+    assert.equal(record.reason, 'ds-bot')
+    // Match DS Bot's unload: restore entry points and remove the marker.
+    stopBot()
+    for (const [backend, original] of adopted) {
+      backend.compactIfNeeded = original.compactIfNeeded
+      delete backend[marker]
+    }
+    await f.step(bot)
+    assert.deepEqual(requests, [ordinary.session.id, bot.session.id])
+  })
+}

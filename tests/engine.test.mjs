@@ -38,9 +38,10 @@ function harness(config = {}, sessionId = 'regression') {
     ? 1 : message.content.reduce((total, block) => total + (block.text?.length ?? 0), 0)
   const ctx = {
     reflect: { provide() {} },
-    on(name, callback) {
+    on(name, callback, options) {
       const callbacks = listeners.get(name) ?? []
-      callbacks.push(callback)
+      if (options?.prepend) callbacks.unshift(callback)
+      else callbacks.push(callback)
       listeners.set(name, callbacks)
     },
     effect(setup) { disposers.push(setup()) },
@@ -83,7 +84,11 @@ function harness(config = {}, sessionId = 'regression') {
   return {
     ctx, engine, agent, session, append, emit, summaries, turn,
     compact: (signal = turn.signal) => engine.compactIfNeeded(agent, 'pressure', signal),
-    step: next => listeners.get('agent/pre-step')[0]({ agent, signal: turn.signal }, next),
+    step: (next = async () => null) => {
+      const callbacks = listeners.get('agent/pre-step')
+      const run = i => i === callbacks.length ? next() : callbacks[i]({ agent, signal: turn.signal }, () => run(i + 1))
+      return run(0)
+    },
     tool: () => emit('session/event', session, { type: 'tool/call' }),
     dispose: () => disposers.forEach(dispose => dispose()),
     records: () => session.snapshotEvents().filter(event => event.type.startsWith('compaction/')),
@@ -934,4 +939,106 @@ test('normal completion cancels optional warmup without discarding the ready sum
   assert.equal(h.summaries.length, 1)
   assert.equal(h.records().filter(e => e.type === 'compaction/summary').length, 1)
   h.dispose()
+})
+
+// DS Bot 0.2.1 parts.js: the marker is engine-wide, the wrapper is per session.
+function adoptBotCompaction(h, owned = () => true) {
+  const original = { compactIfNeeded: h.engine.compactIfNeeded }
+  h.engine[Symbol.for('ds-bot/compaction')] = original
+  h.engine.compactIfNeeded = function (agent, trigger, signal) {
+    if (owned(agent)) return Promise.resolve(null)
+    return original.compactIfNeeded.call(this, agent, trigger, signal)
+  }
+}
+
+test('DS Bot ownership skips tool preparation and automatic application', async () => {
+  const h = harness()
+  adoptBotCompaction(h)
+  h.tool()
+  await h.step()
+  h.tool()
+  await setImmediate()
+  assert.equal(h.summaries.length, 0)
+  assert.equal(h.records().length, 0)
+})
+
+test('DS Bot adoption discards a ready summary instead of leaving it pending', async () => {
+  const h = harness()
+  await h.step()
+  await setImmediate()
+  assert.equal(h.engine.trace.cell(h.session.id).records[0].status, 'ready')
+  adoptBotCompaction(h)
+  await h.step()
+  const record = h.engine.trace.cell(h.session.id).records[0]
+  assert.equal(record.status, 'discarded')
+  assert.equal(record.reason, 'ds-bot')
+  h.tool()
+  await setImmediate()
+  assert.equal(h.summaries.length, 1)
+  assert.equal(h.records().length, 0)
+})
+
+test('DS Bot adoption aborts an in-flight summary and ignores late completion', async () => {
+  const h = harness()
+  let finish, signal
+  h.engine.summarize = async (_input, _agent, abort) => {
+    signal = abort
+    return new Promise(resolve => { finish = resolve })
+  }
+  await h.step()
+  adoptBotCompaction(h)
+  await h.step()
+  assert.equal(signal.aborted, true)
+  finish(envelope())
+  await setImmediate()
+  assert.equal(h.engine.trace.cell(h.session.id).records[0].status, 'discarded')
+  assert.equal(h.records().length, 0)
+})
+
+test('DS Bot wrapper leaves ordinary sessions on the same engine accelerated', async () => {
+  const h = harness()
+  adoptBotCompaction(h, () => false)
+  await h.step()
+  await setImmediate()
+  await h.step()
+  assert.equal(h.summaries.length, 1)
+  assert.ok(h.records().some(event => event.type === 'compaction/summary'))
+})
+
+test('removing DS Bot ownership lets preparation resume', async () => {
+  const h = harness()
+  let owned = true
+  adoptBotCompaction(h, () => owned)
+  await h.step()
+  owned = false
+  await h.step()
+  await setImmediate()
+  assert.equal(h.summaries.length, 1)
+})
+
+test('DS Bot can still request native overflow compaction without background preparation', async () => {
+  const h = harness()
+  adoptBotCompaction(h)
+  await h.step()
+  const original = h.engine[Symbol.for('ds-bot/compaction')]
+  const result = await original.compactIfNeeded.call(h.engine, h.agent, 'context-overflow', h.turn.signal)
+  assert.ok(result)
+  assert.ok(h.records().some(event => event.type === 'compaction/summary'))
+  assert.equal(h.engine.trace.cell(h.session.id).records.some(record => record.mode === 'background'), false)
+  h.tool()
+  await setImmediate()
+  assert.equal(h.summaries.length, 1)
+})
+
+test('DS Bot takeover prevents a late model lookup from starting preparation', async () => {
+  const h = harness()
+  let resolve
+  h.ctx.llm.resolveModelInfo = () => new Promise(done => { resolve = done })
+  h.tool()
+  await setImmediate()
+  adoptBotCompaction(h)
+  await h.step()
+  resolve({ context: { contextWindow: 1000 } })
+  await setImmediate()
+  assert.equal(h.summaries.length, 0)
 })

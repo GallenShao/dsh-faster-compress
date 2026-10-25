@@ -63,6 +63,8 @@ Open **Plugins → Installed → Faster Compress**. Changes apply after saving, 
 
 The defaults suit most use. Advanced options include output reservation, safety margin, and concurrency. Upgrades preserve saved settings.
 
+DS Bot compatibility: sessions whose compaction is managed by ds-bot automatically skip background preparation and warm-up; existing preparations are discarded. DS Bot remains responsible for compaction. Ordinary sessions on the same preset keep acceleration. Detection is automatic; no extra configuration is needed.
+
 ## Before you use it
 
 - Best suited to long conversations and frequent tool use. Background summaries consume model capacity and incur normal provider charges; some waiting may remain.

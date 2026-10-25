@@ -33,6 +33,9 @@ import { TraceJournal, TraceService, textOf, sourceExcerpt, traceError } from '.
 import { ResponseTracker } from './response-trace.js'
 import { inheritReasoning, requestRoute, prefixFingerprint, usageSnapshot } from './request-policy.js'
 
+// DS Bot 0.2.1 wraps this engine's automatic entry point per session.
+const DS_BOT_COMPACTION = Symbol.for('ds-bot/compaction')
+
 const ratio = z.number()
 const positiveInt = z.number().step(1).min(1)
 const warmupTokens = z.number().step(1).min(1).max(8)
@@ -129,6 +132,8 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
   #fallback = new WeakSet()
   /** Agents seen since load, keyed by session id, to reach a session's owner. */
   #agents = new Map()
+  #botAllowed = new WeakSet()
+  #pressureSeen = new WeakSet()
   /** Adapter metadata per routed target, invalidated on adapter updates. */
   #capacity = new Map()
   #capacityEpoch = 0
@@ -221,6 +226,14 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    * @returns {Promise<import('@deepseek-ai/dsh-compaction').CompactionResult | null>} The committed compaction, if any.
    */
   async compactIfNeeded(agent, trigger, signal) {
+    if (trigger === 'pressure') {
+      // Reaching this method means DS Bot's wrapper allowed this session.
+      this.#pressureSeen.add(agent.session)
+      this.#botAllowed.add(agent.session)
+    } else if (this[DS_BOT_COMPACTION] && !this.#botAllowed.has(agent.session)) {
+      this.#discard(agent.session, 'ds-bot')
+      return super.compactIfNeeded(agent, trigger, signal)
+    }
     try { return await this.#compactIfNeeded(agent, trigger, signal) }
     finally { this.responses.endBlocking(agent.session) }
   }
@@ -322,7 +335,7 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    */
   #onToolCall(session) {
     const agent = this.#agents.get(session.id)
-    if (agent === undefined || this.#idle.has(session)) return
+    if (agent === undefined || this.#idle.has(session) || this.#botOwns(session)) return
     const pending = this.#pending.get(session)
     if (pending !== undefined) {
       this.#validateWarmup(agent, pending)
@@ -341,9 +354,27 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     })
   }
 
+  #botOwns(session) {
+    return this[DS_BOT_COMPACTION] !== undefined && !this.#botAllowed.has(session)
+  }
+
   /** Register the listeners this bundle adds to the inherited ones. */
   #registerTriggers() {
     const { ctx } = this
+    // The stock pre-step listener calls the dynamically wrapped method. Observe
+    // whether it reached us instead of treating an entire shared preset as a Bot.
+    ctx.on('agent/pre-step', ({ agent }, next) => {
+      this.#pressureSeen.delete(agent.session)
+      return next()
+    }, { prepend: true })
+    ctx.on('agent/pre-step', ({ agent }, next) => {
+      if (this[DS_BOT_COMPACTION] && !this.#pressureSeen.has(agent.session)) {
+        this.#botAllowed.delete(agent.session)
+        this.#discard(agent.session, 'ds-bot')
+        this.#fallback.delete(agent.session)
+      }
+      return next()
+    })
     ctx.on('agent/created', ({ agent }) => this.bindAgent(agent))
     ctx.on('agent/disposed', ({ agent }) => {
       this.#discard(agent.session, 'disposed')
@@ -383,7 +414,7 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
     const session = agent.session
     const admission = this.#admission.get(session)
     const budget = await this.#budget(agent)
-    if (budget === null || this.#agents.get(session.id) !== agent || this.#idle.has(session)
+    if (budget === null || this.#botOwns(session) || this.#agents.get(session.id) !== agent || this.#idle.has(session)
       || this.#admission.get(session) !== admission) return
     const total = this.ctx.tokenMeter.measure(agent.session).totalTokens
     if (budget.thresholdTokens > 0 && total >= budget.eagerTokens && total < budget.waitTokens && !this.#fallback.has(agent.session)) this.#start(agent, budget)
@@ -452,7 +483,7 @@ export class FasterCompactionEngine extends BasicCompactionEngine {
    */
   #start(agent, budget, turnSignal) {
     const session = agent.session
-    if (this.#abort.signal.aborted || turnSignal?.aborted || this.#idle.has(session) || this.#pending.has(session) || this.#work.inFlight >= this.eager.maxConcurrent) return
+    if (this.#botOwns(session) || this.#abort.signal.aborted || turnSignal?.aborted || this.#idle.has(session) || this.#pending.has(session) || this.#work.inFlight >= this.eager.maxConcurrent) return
 
     const selection = selectRange(session, this.ctx.tokenMeter.measure(session), budget.retainTokens)
     if (selection === null) return

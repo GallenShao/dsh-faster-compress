@@ -21,6 +21,10 @@ Scheduling regressions exercise the real stock pre-step hook, Session, and fallb
 
 Lifecycle regressions cover preparation retention and reuse across normal turn completion, cancellation and disposal, late asynchronous lookups, model-capacity cache invalidation, and idle-session retention limits.
 
+DS Bot 兼容回归按发布包 0.2.1 的引擎标记和逐会话拦截方式验证：跳过后台准备、清理就绪及生成中的摘要、防止迟到查询启动任务、保留普通会话加速和 DS Bot 主动压缩。真实 Cordis 作用域调度另覆盖两种监听器注册顺序、共享预设中的逐会话接管及 DS Bot 卸载后的恢复。
+
+DS Bot compatibility regressions model the engine marker and per-session wrapper in release 0.2.1: skip preparation, discard ready and in-flight summaries, reject late admission, and preserve ordinary-session acceleration and Bot-initiated compaction. Real scoped Cordis dispatch also covers both listener registration orders, per-session takeover on a shared preset, and recovery after DS Bot unload.
+
 ## 隔离浏览器联调 / Isolated browser check
 
 1. 创建独立临时目录作为 `DSH_HOME`，用 DSH CLI 在其中初始化 Web profile，并安装或链接当前源码包。不要指向日常 `~/.dsh`。兼容回归覆盖 DSH `0.2.0-rc.2` 和 `0.2.1-rc.2`。

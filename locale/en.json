@@ -111,6 +111,7 @@
   "trace.outcome.unapplied": "No matching context replacement found",
   "trace.explain.unapplied": "A summary event alone does not prove application; replacement records are authoritative.",
   "trace.reason.restart": "The process restarted; the old in-memory preparation can no longer be committed.",
+  "trace.reason.ds-bot": "DS Bot manages compaction for this session; background preparation has stopped.",
   "trace.reason.unloaded": "The plugin unloaded or reloaded. A live turn falls back to native compaction.",
   "trace.reason.disposed": "The session agent was disposed before application.",
   "trace.reason.idle": "The turn ended before the preparation was needed.",
