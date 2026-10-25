@@ -8,7 +8,7 @@
 ![DSH 0.2.1-rc.2](https://img.shields.io/badge/DSH-tested_on_0.2.1--rc.2-0A7A78?style=flat-square)
 ![MIT](https://img.shields.io/badge/license-MIT-526B7A?style=flat-square)
 
-![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.3/assets/overview-en.svg)
+![Stock compaction waits for a summary. Faster Compress prepares it in the background and commits at a step boundary.](https://raw.githubusercontent.com/GallenShao/dsh-faster-compress/v0.2.4/assets/overview-en.svg)
 
 **Background context compaction** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Reduce pauses for summaries during long tasks, and inspect results, timings, and token usage in Compaction History.
 
