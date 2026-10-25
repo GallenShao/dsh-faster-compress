@@ -2,6 +2,14 @@
 
 各版本的功能变化见 [更新日志](CHANGELOG.md)。下列提交、标签和 npm 包用于追溯发布内容；发布流程见 [AGENTS.md](AGENTS.md)。
 
+## 0.2.4 · 2026-10-25
+
+- npm：[`dsh-faster-compress@0.2.4`](https://www.npmjs.com/package/dsh-faster-compress/v/0.2.4)
+- Git 提交：[`338ab8aebbea0db0ece42c026d77568f95facdb3`](https://github.com/GallenShao/dsh-faster-compress/commit/338ab8aebbea0db0ece42c026d77568f95facdb3)
+- Git 标签：[`v0.2.4`](https://github.com/GallenShao/dsh-faster-compress/tree/v0.2.4)
+- tarball SHA-1：`a75b3d70842034e586c58fa72b5cd26d9b97b642`
+- tarball integrity：`sha512-nW8WFa10xLmpZdmAe4qE5scJpzH+C9nQWpb7DdeA5deGaJQgW6iyy0ZV2y/GwTpaK7+SZthatc7Hb9ZHuv2EAA==`
+
 ## 0.2.3 · 2026-10-19
 
 - npm：[`dsh-faster-compress@0.2.3`](https://www.npmjs.com/package/dsh-faster-compress/v/0.2.3)
